@@ -272,7 +272,7 @@ class SectorBacktest:
         ]
         print(f"\n  回测区间: {date_start} ~ {date_end}, 共 {len(test_dates)} 个交易日")
         print(f"  初始资金: {self.initial_capital:,.0f}")
-        print(f"  形态识别: 回调≥{DOWN_AMPLITUDE*100:.0f}%, |日涨跌|≤6%, 窄幅筑底≤2%, 年线上方, 冷却{COOLDOWN_DAYS}天")
+        print(f"  形态识别: 回调≥{DOWN_AMPLITUDE*100:.0f}%, |日涨跌|≤6%, 距撤军线≤2%, 年线上方, 冷却{COOLDOWN_DAYS}天")
         print(f"  D目标: ATR*{ATR_TARGET_MULTIPLIER:.0f} | C选股: 板块前{REL_STRENGTH_TOP_PCT*100:.0f}%")
         print(f"  止损{STOP_LOSS_PCT*100:.0f}% | 持仓≤{MAX_HOLD_DAYS}天 | 每日上限{MAX_TRADES_PER_DAY}笔")
         print(f"  敞口上限: 总{MAX_CONCURRENT_POSITIONS}笔 | 单板块{MAX_POSITIONS_PER_SECTOR}笔")
@@ -317,7 +317,7 @@ class SectorBacktest:
         return pd.DataFrame(self.equity_curve)
 
     def _check_exits(self, date) -> None:
-        """检查持仓退出"""
+        """检查持仓退出（撤军线=入场时的10日最低价，固定不追跌）"""
         for code, pos in list(self.positions.items()):
             df = self.stock_data.get(code)
             if df is None or date not in df.index:
@@ -329,14 +329,11 @@ class SectorBacktest:
             if current_price > pos.get("high_since", pos["entry_price"]):
                 pos["high_since"] = current_price
 
-            _, stop_info = self.risk_manager.calculate_stop_price(
-                entry_price=pos["entry_price"],
-                current_high=pos["high_since"],
-            )
-            dynamic_stop = stop_info["final_stop"]
+            # 撤军线 = 入场时的10日最低价，固定不追跌
+            stop_line = pos["stop_price"]
 
             exit_reason = None
-            if current_price <= dynamic_stop:
+            if current_price <= stop_line:
                 exit_reason = "止损"
             elif current_price >= pos["target_price"]:
                 exit_reason = "止盈"
@@ -434,9 +431,13 @@ class SectorBacktest:
 
             hist = df.loc[:date]
 
-            # 止跌形态
+            # 撤军线 = 10日最低价
+            stop_price = float(hist["low"].iloc[-10:].min())
+            entry_price = float(hist["close"].iloc[-1])
+
+            # 止跌形态（含窄幅筑底：距撤军线≤2%）
             recognizer = self.pattern_recognizers[code]
-            is_bottom, bottom_info = recognizer.is_bottom_pattern(hist)
+            is_bottom, bottom_info = recognizer.is_bottom_pattern(hist, stop_price)
             if not is_bottom:
                 if bottom_info.get("cooldown"):
                     self._stat_bottom_cooldown += 1
@@ -444,19 +445,7 @@ class SectorBacktest:
                     self._stat_bottom_fail += 1
                 continue
 
-            # 均线支撑确认：收盘价站上 5 日均线
-            if len(hist) >= 5:
-                ma5 = float(hist["close"].iloc[-5:].mean())
-                curr_close = float(hist["close"].iloc[-1])
-                if curr_close < ma5:
-                    self._stat_entry_fail += 1
-                    continue
-
-            # 固定止损
-            entry_price = float(hist["close"].iloc[-1])
-            stop_price = entry_price * (1 - self.config.risk_config.stop_loss_pct)
-
-            # 入场信号
+            # 入场信号（撤军线=止损线）
             can_enter, entry_info = self.entry_checker.can_enter(
                 hist, stop_price, "14:50"
             )

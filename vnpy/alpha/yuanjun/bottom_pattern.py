@@ -31,7 +31,7 @@ class BottomPatternRecognizer:
     逐条检查四个条件：
     1. 回调幅度 ≥ 阈值
     2. 最近10日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
-    3. 股价在10日最低价上方不超过阈值（窄幅筑底）
+    3. 股价在撤军线（止损线）上方不超过阈值（窄幅筑底）
     4. 股价站上250日均线（年线，过滤下跌趋势股）
     """
 
@@ -46,7 +46,9 @@ class BottomPatternRecognizer:
         self._last_triggered_date = pd.NaT
         self._last_triggered_amplitude = 0.0
 
-    def is_bottom_pattern(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
+    def is_bottom_pattern(
+        self, df: pd.DataFrame, stop_loss_price: float = 0.0
+    ) -> Tuple[bool, Dict]:
         """判断是否形成止跌形态
 
         采用"事件模式"：每个回调周期只报最早触发日一次，
@@ -56,6 +58,8 @@ class BottomPatternRecognizer:
         ----------
         df : pd.DataFrame
             个股日线数据，需包含 open/high/low/close/volume 列
+        stop_loss_price : float, optional
+            撤军线（止损线），用于窄幅筑底检查
 
         Returns
         -------
@@ -107,8 +111,8 @@ class BottomPatternRecognizer:
         if not passed:
             return False, result
 
-        # 条件3：股价在10日最低价上方不超过阈值（窄幅筑底）
-        passed, near_info = self._check_near_bottom(df)
+        # 条件3：股价在撤军线（止损线）上方不超过阈值（窄幅筑底）
+        passed, near_info = self._check_near_bottom(df, stop_loss_price)
         result.update(near_info)
         if not passed:
             return False, result
@@ -210,33 +214,35 @@ class BottomPatternRecognizer:
     # 条件3：窄幅筑底检查
     # ------------------------------------------------------------------
 
-    def _check_near_bottom(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
-        """检查股价是否在10日最低价附近（窄幅区间内）
+    def _check_near_bottom(self, df: pd.DataFrame, stop_loss_price: float = 0.0) -> Tuple[bool, Dict]:
+        """检查股价是否在撤军线（止损线）附近（窄幅区间内）
 
-        股价在前10日最低价上方不超过最低价*near_bottom_max_pct%，
-        确认处于底部窄幅区间内，尚未远离底部。
+        股价在撤军线上方不超过撤军线*near_bottom_max_pct%，
+        确认当前价格已接近止损位，处于底部边缘。
 
         Returns
         -------
         Tuple[bool, Dict]
-            (是否通过, {"min_low_10": float, "distance_from_low": float, ...})
+            (是否通过, {"stop_loss_price": float, "distance_from_stop": float, ...})
         """
-        min_low_10 = float(df["low"].iloc[-10:].min())
+        if stop_loss_price <= 0:
+            return False, {"reason": "撤军线价格为0，无法检查"}
+
         current_price = float(df["close"].iloc[-1])
-        distance = (current_price - min_low_10) / min_low_10 if min_low_10 > 0 else 0
+        distance = (current_price - stop_loss_price) / stop_loss_price
 
         info = {
-            "min_low_10": round(min_low_10, 2),
-            "distance_from_low": round(distance, 4),
+            "stop_loss_price": round(stop_loss_price, 2),
+            "distance_from_stop": round(distance, 4),
         }
 
         if distance < 0:
-            info["reason"] = f"当前价{current_price:.2f}已跌破10日最低价{min_low_10:.2f}"
+            info["reason"] = f"当前价{current_price:.2f}已跌破撤军线{stop_loss_price:.2f}"
             return False, info
 
         if distance > self.config.near_bottom_max_pct:
             info["reason"] = (
-                f"距10日最低价{distance:.2%} > 阈值{self.config.near_bottom_max_pct:.0%}，反弹过高"
+                f"距撤军线{distance:.2%} > 阈值{self.config.near_bottom_max_pct:.0%}，离止损太远"
             )
             return False, info
 
