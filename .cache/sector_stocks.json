@@ -1,0 +1,412 @@
+{
+  "600030": {
+    "name": "中信证券",
+    "industry": "券商",
+    "baostock_code": "sh.600030"
+  },
+  "600053": {
+    "name": "*ST九鼎",
+    "industry": "券商",
+    "baostock_code": "sh.600053"
+  },
+  "600061": {
+    "name": "国投资本",
+    "industry": "券商",
+    "baostock_code": "sh.600061"
+  },
+  "600095": {
+    "name": "湘财股份",
+    "industry": "券商",
+    "baostock_code": "sh.600095"
+  },
+  "600109": {
+    "name": "国金证券",
+    "industry": "券商",
+    "baostock_code": "sh.600109"
+  },
+  "600155": {
+    "name": "华创云信",
+    "industry": "券商",
+    "baostock_code": "sh.600155"
+  },
+  "600369": {
+    "name": "西南证券",
+    "industry": "券商",
+    "baostock_code": "sh.600369"
+  },
+  "600621": {
+    "name": "华鑫股份",
+    "industry": "券商",
+    "baostock_code": "sh.600621"
+  },
+  "600783": {
+    "name": "鲁信创投",
+    "industry": "券商",
+    "baostock_code": "sh.600783"
+  },
+  "600864": {
+    "name": "哈投股份",
+    "industry": "券商",
+    "baostock_code": "sh.600864"
+  },
+  "600906": {
+    "name": "财达证券",
+    "industry": "券商",
+    "baostock_code": "sh.600906"
+  },
+  "600909": {
+    "name": "华安证券",
+    "industry": "券商",
+    "baostock_code": "sh.600909"
+  },
+  "600918": {
+    "name": "中泰证券",
+    "industry": "券商",
+    "baostock_code": "sh.600918"
+  },
+  "600927": {
+    "name": "永安期货",
+    "industry": "券商",
+    "baostock_code": "sh.600927"
+  },
+  "600958": {
+    "name": "东方证券",
+    "industry": "券商",
+    "baostock_code": "sh.600958"
+  },
+  "600999": {
+    "name": "招商证券",
+    "industry": "券商",
+    "baostock_code": "sh.600999"
+  },
+  "601059": {
+    "name": "信达证券",
+    "industry": "券商",
+    "baostock_code": "sh.601059"
+  },
+  "601066": {
+    "name": "中信建投",
+    "industry": "券商",
+    "baostock_code": "sh.601066"
+  },
+  "601099": {
+    "name": "太平洋",
+    "industry": "券商",
+    "baostock_code": "sh.601099"
+  },
+  "601108": {
+    "name": "财通证券",
+    "industry": "券商",
+    "baostock_code": "sh.601108"
+  },
+  "601136": {
+    "name": "首创证券",
+    "industry": "券商",
+    "baostock_code": "sh.601136"
+  },
+  "601162": {
+    "name": "天风证券",
+    "industry": "券商",
+    "baostock_code": "sh.601162"
+  },
+  "601198": {
+    "name": "东兴证券",
+    "industry": "券商",
+    "baostock_code": "sh.601198"
+  },
+  "601211": {
+    "name": "国泰海通",
+    "industry": "券商",
+    "baostock_code": "sh.601211"
+  },
+  "601236": {
+    "name": "红塔证券",
+    "industry": "券商",
+    "baostock_code": "sh.601236"
+  },
+  "601375": {
+    "name": "中原证券",
+    "industry": "券商",
+    "baostock_code": "sh.601375"
+  },
+  "601377": {
+    "name": "兴业证券",
+    "industry": "券商",
+    "baostock_code": "sh.601377"
+  },
+  "601456": {
+    "name": "国联民生",
+    "industry": "券商",
+    "baostock_code": "sh.601456"
+  },
+  "601555": {
+    "name": "东吴证券",
+    "industry": "券商",
+    "baostock_code": "sh.601555"
+  },
+  "601688": {
+    "name": "华泰证券",
+    "industry": "券商",
+    "baostock_code": "sh.601688"
+  },
+  "601696": {
+    "name": "中银证券",
+    "industry": "券商",
+    "baostock_code": "sh.601696"
+  },
+  "601788": {
+    "name": "光大证券",
+    "industry": "券商",
+    "baostock_code": "sh.601788"
+  },
+  "601878": {
+    "name": "浙商证券",
+    "industry": "券商",
+    "baostock_code": "sh.601878"
+  },
+  "601881": {
+    "name": "中国银河",
+    "industry": "券商",
+    "baostock_code": "sh.601881"
+  },
+  "601901": {
+    "name": "方正证券",
+    "industry": "券商",
+    "baostock_code": "sh.601901"
+  },
+  "601990": {
+    "name": "南京证券",
+    "industry": "券商",
+    "baostock_code": "sh.601990"
+  },
+  "601995": {
+    "name": "中金公司",
+    "industry": "券商",
+    "baostock_code": "sh.601995"
+  },
+  "603093": {
+    "name": "南华期货",
+    "industry": "券商",
+    "baostock_code": "sh.603093"
+  },
+  "000166": {
+    "name": "申万宏源",
+    "industry": "券商",
+    "baostock_code": "sz.000166"
+  },
+  "000686": {
+    "name": "东北证券",
+    "industry": "券商",
+    "baostock_code": "sz.000686"
+  },
+  "000712": {
+    "name": "锦龙股份",
+    "industry": "券商",
+    "baostock_code": "sz.000712"
+  },
+  "000728": {
+    "name": "国元证券",
+    "industry": "券商",
+    "baostock_code": "sz.000728"
+  },
+  "000750": {
+    "name": "国海证券",
+    "industry": "券商",
+    "baostock_code": "sz.000750"
+  },
+  "000776": {
+    "name": "广发证券",
+    "industry": "券商",
+    "baostock_code": "sz.000776"
+  },
+  "000783": {
+    "name": "长江证券",
+    "industry": "券商",
+    "baostock_code": "sz.000783"
+  },
+  "001236": {
+    "name": "弘业期货",
+    "industry": "券商",
+    "baostock_code": "sz.001236"
+  },
+  "002500": {
+    "name": "山西证券",
+    "industry": "券商",
+    "baostock_code": "sz.002500"
+  },
+  "002670": {
+    "name": "国盛证券",
+    "industry": "券商",
+    "baostock_code": "sz.002670"
+  },
+  "002673": {
+    "name": "西部证券",
+    "industry": "券商",
+    "baostock_code": "sz.002673"
+  },
+  "002736": {
+    "name": "国信证券",
+    "industry": "券商",
+    "baostock_code": "sz.002736"
+  },
+  "002797": {
+    "name": "第一创业",
+    "industry": "券商",
+    "baostock_code": "sz.002797"
+  },
+  "002926": {
+    "name": "华西证券",
+    "industry": "券商",
+    "baostock_code": "sz.002926"
+  },
+  "002939": {
+    "name": "长城证券",
+    "industry": "券商",
+    "baostock_code": "sz.002939"
+  },
+  "002945": {
+    "name": "华林证券",
+    "industry": "券商",
+    "baostock_code": "sz.002945"
+  },
+  "002961": {
+    "name": "瑞达期货",
+    "industry": "券商",
+    "baostock_code": "sz.002961"
+  },
+  "600171": {
+    "name": "上海贝岭",
+    "industry": "半导体",
+    "baostock_code": "sh.600171"
+  },
+  "600460": {
+    "name": "士兰微",
+    "industry": "半导体",
+    "baostock_code": "sh.600460"
+  },
+  "600770": {
+    "name": "综艺股份",
+    "industry": "半导体",
+    "baostock_code": "sh.600770"
+  },
+  "603160": {
+    "name": "汇顶科技",
+    "industry": "半导体",
+    "baostock_code": "sh.603160"
+  },
+  "603290": {
+    "name": "斯达半导",
+    "industry": "半导体",
+    "baostock_code": "sh.603290"
+  },
+  "603501": {
+    "name": "韦尔股份",
+    "industry": "半导体",
+    "baostock_code": "sh.603501"
+  },
+  "603986": {
+    "name": "兆易创新",
+    "industry": "半导体",
+    "baostock_code": "sh.603986"
+  },
+  "605358": {
+    "name": "立昂微",
+    "industry": "半导体",
+    "baostock_code": "sh.605358"
+  },
+  "600584": {
+    "name": "长电科技",
+    "industry": "半导体",
+    "baostock_code": "sh.600584"
+  },
+  "002156": {
+    "name": "通富微电",
+    "industry": "半导体",
+    "baostock_code": "sz.002156"
+  },
+  "002185": {
+    "name": "华天科技",
+    "industry": "半导体",
+    "baostock_code": "sz.002185"
+  },
+  "002008": {
+    "name": "大族激光",
+    "industry": "半导体",
+    "baostock_code": "sz.002008"
+  },
+  "002371": {
+    "name": "北方华创",
+    "industry": "半导体",
+    "baostock_code": "sz.002371"
+  },
+  "600183": {
+    "name": "生益科技",
+    "industry": "半导体",
+    "baostock_code": "sh.600183"
+  },
+  "002409": {
+    "name": "雅克科技",
+    "industry": "半导体",
+    "baostock_code": "sz.002409"
+  },
+  "002129": {
+    "name": "中环股份",
+    "industry": "半导体",
+    "baostock_code": "sz.002129"
+  },
+  "000063": {
+    "name": "中兴通讯",
+    "industry": "半导体",
+    "baostock_code": "sz.000063"
+  },
+  "000938": {
+    "name": "紫光股份",
+    "industry": "半导体",
+    "baostock_code": "sz.000938"
+  },
+  "002049": {
+    "name": "紫光国微",
+    "industry": "半导体",
+    "baostock_code": "sz.002049"
+  },
+  "600703": {
+    "name": "三安光电",
+    "industry": "半导体",
+    "baostock_code": "sh.600703"
+  },
+  "600345": {
+    "name": "长江通信",
+    "industry": "半导体",
+    "baostock_code": "sh.600345"
+  },
+  "002916": {
+    "name": "深南电路",
+    "industry": "半导体",
+    "baostock_code": "sz.002916"
+  },
+  "002938": {
+    "name": "鹏鼎控股",
+    "industry": "半导体",
+    "baostock_code": "sz.002938"
+  },
+  "600667": {
+    "name": "太极实业",
+    "industry": "半导体",
+    "baostock_code": "sh.600667"
+  },
+  "000021": {
+    "name": "深科技",
+    "industry": "半导体",
+    "baostock_code": "sz.000021"
+  },
+  "000100": {
+    "name": "TCL科技",
+    "industry": "半导体",
+    "baostock_code": "sz.000100"
+  },
+  "000725": {
+    "name": "京东方A",
+    "industry": "半导体",
+    "baostock_code": "sz.000725"
+  }
+}
