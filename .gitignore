@@ -44,3 +44,8 @@ vnpy_env/
 # Alpha
 lab/
 /.mypy_cache
+
+# Cache
+cache_zt/
+output/
+.workbuddy/
