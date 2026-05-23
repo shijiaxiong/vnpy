@@ -117,11 +117,11 @@ class BottomPatternRecognizer:
         if not passed:
             return False, result
 
-        # 条件4：股价站上250日均线（年线）
-        passed, ma250_info = self._check_above_ma250(df)
-        result.update(ma250_info)
-        if not passed:
-            return False, result
+        # # 条件4：股价站上250日均线（年线）
+        # passed, ma250_info = self._check_above_ma250(df)
+        # result.update(ma250_info)
+        # if not passed:
+        #     return False, result
 
         # 四个条件均满足 → 触发，记录触发日期和幅度，进入冷却期
         result["is_bottom"] = True

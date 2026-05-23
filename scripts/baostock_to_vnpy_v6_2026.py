@@ -1,8 +1,7 @@
 """
-baostock -> vnpy SQLite 补录2023年数据
-用途：补充 2023-01-01 ~ 2023-12-31 的5分钟K线数据
+baostock -> vnpy SQLite 2026年数据导入
+用途：补齐 2026-01-01 至 2026-05-21 的5分钟K线数据
 """
-
 import baostock as bs
 import sys
 import time
@@ -21,18 +20,20 @@ from vnpy.trader.database import get_database, DB_TZ
 
 # ===================== 配置 =====================
 
-START_DATE = "2023-01-01"    # 补录起点
-END_DATE = "2023-12-31"       # 截止
+START_DATE = "2026-05-12"
+END_DATE = "2026-05-21"
 BS_FREQ = "5"
 VT_INTERVAL = Interval.MINUTE5
-QUERY_DELAY = 0.5             # 官方推荐：>= 500ms
-BATCH_SIZE = 50              # 每批提交数
-RELOGIN_EVERY = 50           # 每 N 只重登录一次，防止会话级断流
-MAX_RETRIES = 3               # 单只股票最大重试
-RETRY_DELAY = 2               # 重试前等待（秒）
+QUERY_DELAY = 0.5
+BATCH_SIZE = 50
+RELOGIN_EVERY = 50
+MAX_RETRIES = 3
+RETRY_DELAY = 2
+DB_RETRY_MAX = 5
+DB_RETRY_DELAY = 3
 CACHE_FILE = "/Users/zyb/go/src/github/vnpy/.cache/stocks_akshare.json"
-PROGRESS_FILE = "/tmp/baostock_progress_2023.json"
-LOG_FILE = "/tmp/baostock_v4_2023.log"
+PROGRESS_FILE = "/tmp/baostock_progress_2026_delta.json"
+LOG_FILE = "/tmp/baostock_v6_2026_delta.log"
 
 
 # ===================== 工具函数 =====================
@@ -53,7 +54,6 @@ def parse_bs_datetime(time_str: str) -> Datetime:
 
 
 def query_bars(bs_symbol: str, start: str, end: str) -> list[BarData]:
-    """下载单只股票，带重试"""
     fields = "date,time,open,high,low,close,volume,amount"
     for attempt in range(MAX_RETRIES):
         try:
@@ -86,7 +86,6 @@ def query_bars(bs_symbol: str, start: str, end: str) -> list[BarData]:
 
 
 def login():
-    """带重试的登录"""
     for attempt in range(3):
         try:
             bs.login()
@@ -98,11 +97,27 @@ def login():
 
 
 def logout():
-    """带忽略错误的登出"""
     try:
         bs.logout()
     except Exception:
         pass
+
+
+def save_bars_with_retry(db, bars: list) -> bool:
+    for attempt in range(DB_RETRY_MAX):
+        try:
+            db.save_bar_data(bars)
+            return True
+        except Exception as e:
+            err = str(e)
+            if "locked" in err.lower() or "OperationalError" in str(type(e).__name__):
+                wait = DB_RETRY_DELAY * (2 ** attempt)
+                print(f"  DB锁冲突，{wait}s后重试({attempt+1}/{DB_RETRY_MAX})...")
+                time.sleep(wait)
+            else:
+                raise
+    print(f"  DB写入失败(已重试{DB_RETRY_MAX}次)，丢弃{len(bars)}条")
+    return False
 
 
 def load_progress() -> dict:
@@ -120,10 +135,11 @@ def save_progress(progress: dict):
 # ===================== 主流程 =====================
 
 def main():
-    print(f"=== baostock 补录2025年数据 -> vnpy SQLite ===")
+    print(f"=== baostock 2026年 -> vnpy SQLite ===")
     print(f"  数据区间: {START_DATE} ~ {END_DATE}")
     print(f"  K线频率: {BS_FREQ} 分钟")
     print(f"  查询间隔: {QUERY_DELAY}s, 每{RELOGIN_EVERY}只重登录")
+    print(f"  DB写入重试: {DB_RETRY_MAX}次, 起始{DB_RETRY_DELAY}s指数退避")
     print()
 
     # Step1: 加载股票池
@@ -132,34 +148,29 @@ def main():
 
     # Step2: 加载断点
     progress = load_progress()
-    done_set = set(progress["done"])
-    failed_set = set(progress["failed"])
+    done_set = set(progress.get("done", []))
+    failed_set = set(progress.get("failed", []))
 
-    # 优先SSE（上次全部失败），再SZ，跳过已完成
-    sh_stocks = [s for s in all_stocks if s.startswith("sh.") and s not in done_set]
-    sz_stocks = [s for s in all_stocks if s.startswith("sz.") and s not in done_set]
-    to_import = sh_stocks + sz_stocks
+    to_import = sorted(set(all_stocks) - done_set - failed_set)
+    # 加上之前失败的（重试）
+    to_import = sorted(list(set(to_import) | (failed_set - done_set)))
 
-    print(f"  全部股票: {len(all_stocks)} (SSE {len([s for s in all_stocks if s.startswith('sh.')])} + SZ {len([s for s in all_stocks if s.startswith('sz.')])})")
+    print(f"  全部股票: {len(all_stocks)}")
     print(f"  已完成: {len(done_set)} 只")
-    print(f"  失败(跳过): {len(failed_set)} 只")
     print(f"  待处理: {len(to_import)} 只")
-    if sh_stocks:
-        print(f"  SSE优先: {len(sh_stocks)} 只待导入")
-    print(f"  预估耗时: ~{len(to_import) * QUERY_DELAY / 60:.0f} 分钟")
+    print(f"  预估耗时: ~{len(to_import) * QUERY_DELAY / 60:.0f} 分钟（仅API）")
     print()
 
     # Step3: 初始化
     db = get_database()
     total_bars = 0
     total = len(to_import)
-    new_done = set(progress["done"])
-    new_failed = set(progress["failed"])
+    new_done = set(done_set)
+    new_failed = set()
 
     try:
         login()
         batch_bars = []
-        consecutive_fail = 0
 
         for i, bs_sym in enumerate(to_import):
             bars = query_bars(bs_sym, START_DATE, END_DATE)
@@ -169,25 +180,29 @@ def main():
                 batch_bars.extend(bars)
                 total_bars += len(bars)
                 new_done.add(bs_sym)
-                consecutive_fail = 0
             else:
                 new_failed.add(bs_sym)
-                consecutive_fail += 1
 
             # 每 BATCH_SIZE 提交一次
             if len(batch_bars) >= BATCH_SIZE or (i + 1) == total:
                 if batch_bars:
-                    db.save_bar_data(batch_bars)
+                    ok = save_bars_with_retry(db, batch_bars)
+                    if not ok:
+                        for sym in to_import[max(0, i-BATCH_SIZE+1):i+1]:
+                            if sym in new_done:
+                                new_done.discard(sym)
+                                new_failed.add(sym)
                     batch_bars = []
 
             # 每20只打印进度
             if (i + 1) % 20 == 0 or (i + 1) == total:
                 pct = (i + 1) / total * 100
                 mark = "SSE" if bs_sym.startswith("sh.") else "SZ "
+                bc = len(bars) if bars else 0
                 print(f"  [{i+1}/{total}] ({pct:.0f}%) {mark} {bs_sym} "
-                      f"+{len(bars) if bars else 0}条  累计: {total_bars}条")
+                      f"+{bc}条  累计: {total_bars}条")
 
-            # 每 RELOGIN_EVERY 只重登录一次
+            # 每 RELOGIN_EVERY 只重登录
             if (i + 1) % RELOGIN_EVERY == 0:
                 logout()
                 time.sleep(1)
@@ -203,7 +218,7 @@ def main():
 
         # 剩余提交
         if batch_bars:
-            db.save_bar_data(batch_bars)
+            save_bars_with_retry(db, batch_bars)
 
         save_progress({
             "done": sorted(new_done),
@@ -215,12 +230,12 @@ def main():
 
     print(f"\n{'='*50}")
     print(f"  全部股票: {len(all_stocks)}")
-    print(f"  本次导入: {total_bars} 条 ({total - len([s for s in to_import if s in new_failed])} 只)")
+    print(f"  本次完成: {len(new_done - done_set)} 只")
     print(f"  累计完成: {len(new_done)} 只")
-    print(f"  累计失败: {len(new_failed)} 只")
+    print(f"  本次失败: {len(new_failed)} 只")
+    print(f"  导入K线: {total_bars} 条")
     if new_failed:
         print(f"  失败样本: {sorted(new_failed)[:5]}")
-    print(f"  数据库: ~/.vntrader/database.db")
     print(f"{'='*50}")
 
 
