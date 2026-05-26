@@ -21,7 +21,7 @@ class EntrySignalChecker:
     """入场信号检查器
 
     在龙头股已确认止跌形态后，检查是否满足入场条件。
-    必须同时满足：尾盘时间 + 价格在止损线上方1%-3% + 盈亏比≥2:1。
+    必须同时满足：尾盘时间 + 价格在止损线上方0%-2% + 盈亏比≥2:1。
 
     Parameters
     ----------
@@ -71,7 +71,7 @@ class EntrySignalChecker:
         result["current_price"] = current_price
         result["stop_loss"] = stop_loss_price
 
-        # 条件2：价格位置检查（距止损线1%-3%）
+        # 条件2：价格位置检查（距止损线0%-2%）
         dist_ok, dist_info = self._check_price_distance(current_price, stop_loss_price)
         result.update(dist_info)
         if not dist_ok:

@@ -70,14 +70,22 @@ class BottomPatternConfig:
     """回调最小幅度（8%）"""
     price_spike_threshold: float = 0.06
     """禁止出现|日涨幅|>6%的K线（大阳线和大阴线均视为不稳定信号）"""
-    near_bottom_max_pct: float = 0.02
-    """股价在最近10日最低价上方不超过此比例（当前用于确认窄幅筑底，2%）"""
+    near_bottom_max_pct: float = 0.05
+    """股价在最近10日最低价上方不超过此比例（窄幅筑底，5%，覆盖大票温和回调）"""
     above_ma250: bool = True
     """是否要求股价站上250日均线（年线）"""
     cooldown_days: int = 15
     """触发后沉默多少个交易日不重复报底"""
     cooldown_interrupt_threshold: float = 0.05
     """冷却期内若幅度扩大超过此阈值，打断冷却重新报底（5%）"""
+    enable_macd_convergence: bool = True
+    """是否启用MACD BAR收敛检查（空头力量减弱确认）"""
+    macd_convergence_days: int = 2
+    """MACD BAR连续回升天数（要求BAR连续N日不创新低且回升）"""
+    enable_rel_strength_filter: bool = True
+    """是否启用子板块相对强度过滤（过滤排名后50%）"""
+    rel_strength_top_pct: float = 0.5
+    """子板块内排名前N%才通过（0.5=前50%）"""
 
 
 @dataclass
@@ -92,10 +100,10 @@ class EntryConfig:
     """开始买入时间"""
     entry_time_end: str = "14:55"
     """结束买入时间"""
-    min_distance_to_stop: float = 0.01
-    """距离止损线至少1%才考虑"""
-    max_distance_to_stop: float = 0.03
-    """距离止损线超过3%则放弃"""
+    min_distance_to_stop: float = 0.0
+    """距离止损线最低0%（紧贴撤军线也可入场）"""
+    max_distance_to_stop: float = 0.02
+    """距离止损线超过2%则放弃"""
     min_risk_reward_ratio: float = 2.0
     """最小盈亏比2:1"""
     target_resistance_lookback: int = 60

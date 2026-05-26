@@ -47,7 +47,8 @@ class BottomPatternRecognizer:
         self._last_triggered_amplitude = 0.0
 
     def is_bottom_pattern(
-        self, df: pd.DataFrame, stop_loss_price: float = 0.0
+        self, df: pd.DataFrame, stop_loss_price: float = 0.0,
+        rel_strength_rank_pct: float = 0.0,
     ) -> Tuple[bool, Dict]:
         """判断是否形成止跌形态
 
@@ -117,13 +118,19 @@ class BottomPatternRecognizer:
         if not passed:
             return False, result
 
-        # # 条件4：股价站上250日均线（年线）
-        # passed, ma250_info = self._check_above_ma250(df)
-        # result.update(ma250_info)
-        # if not passed:
-        #     return False, result
+        # 条件4：MACD BAR收敛（空头力量减弱确认）
+        passed, macd_info = self._check_macd_convergence(df)
+        result.update(macd_info)
+        if not passed:
+            return False, result
 
-        # 四个条件均满足 → 触发，记录触发日期和幅度，进入冷却期
+        # 条件5：子板块相对强度（过滤排名后50%的弱势股）
+        passed, rank_info = self._check_relative_strength(rel_strength_rank_pct)
+        result.update(rank_info)
+        if not passed:
+            return False, result
+
+        # 所有条件均满足 → 触发，记录触发日期和幅度，进入冷却期
         result["is_bottom"] = True
         if cooldown_interrupted:
             result["cooldown_interrupted"] = True
@@ -208,6 +215,93 @@ class BottomPatternRecognizer:
         passed = not has_spike
         if not passed:
             label = "大阳线" if spike_type == "yang" else "大阴线"
+        return passed, info
+
+    # ------------------------------------------------------------------
+    # 条件4：MACD BAR收敛检查（空头力量减弱确认）
+    # ------------------------------------------------------------------
+
+    def _check_macd_convergence(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
+        """检查MACD BAR是否连续回升（空头力量在减弱）
+
+        要求：MACD BAR连续N日不创新低且在回升。
+        BAR仍为负值（空头主导），但方向已转向多头。
+
+        Returns
+        -------
+        Tuple[bool, Dict]
+            (是否通过, {"macd_bar": float, "macd_bar_converging": bool, ...})
+        """
+        if not self.config.enable_macd_convergence:
+            return True, {"macd_convergence": "disabled"}
+
+        if len(df) < 30:
+            return False, {"reason": f"数据不足30天（仅{len(df)}天），无法计算MACD"}
+
+        close = df["close"].values
+        # EMA12
+        ema12 = pd.Series(close).ewm(span=12, adjust=False).mean().values
+        ema26 = pd.Series(close).ewm(span=26, adjust=False).mean().values
+        dif = ema12 - ema26
+        dea = pd.Series(dif).ewm(span=9, adjust=False).mean().values
+        bar = 2 * (dif - dea)  # MACD柱
+
+        current_bar = float(bar[-1])
+        info = {
+            "macd_bar": round(current_bar, 4),
+            "macd_dif": round(float(dif[-1]), 4),
+            "macd_dea": round(float(dea[-1]), 4),
+        }
+
+        # 检查连续N日BAR回升
+        if len(bar) < self.config.macd_convergence_days + 1:
+            return False, {"reason": "MACD数据不足，无法判断收敛", **info}
+
+        converging = True
+        for i in range(self.config.macd_convergence_days):
+            if bar[-(i + 1)] <= bar[-(i + 2)]:
+                converging = False
+                break
+
+        info["macd_bar_converging"] = converging
+        if not converging:
+            info["reason"] = (
+                f"MACD BAR连续{self.config.macd_convergence_days}日未回升，空头仍未衰竭"
+            )
+            return False, info
+
+        return True, info
+
+    # ------------------------------------------------------------------
+    # 条件5：子板块相对强度检查（过滤弱势股）
+    # ------------------------------------------------------------------
+
+    def _check_relative_strength(self, rank_pct: float) -> Tuple[bool, Dict]:
+        """检查个股在子板块内的排名是否在前N%
+
+        Parameters
+        ----------
+        rank_pct : float
+            排名百分位（0.0=第1名, 1.0=最后一名），由调用方传入
+
+        Returns
+        -------
+        Tuple[bool, Dict]
+            (是否通过, {"rel_strength_rank_pct": float, ...})
+        """
+        if not self.config.enable_rel_strength_filter:
+            return True, {"rel_strength_filter": "disabled"}
+
+        if rank_pct <= 0:
+            return True, {"rel_strength_filter": "no_peers", "rel_strength_rank_pct": 0.0}
+
+        info = {"rel_strength_rank_pct": round(rank_pct, 4)}
+        passed = rank_pct <= self.config.rel_strength_top_pct
+
+        if not passed:
+            info["reason"] = (
+                f"子板块排名{rank_pct:.0%} > 阈值{self.config.rel_strength_top_pct:.0%}"
+            )
         return passed, info
 
     # ------------------------------------------------------------------

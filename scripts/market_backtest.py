@@ -165,8 +165,8 @@ class MarketBacktest:
             entry_config=EntryConfig(
                 entry_time_start="14:40",
                 entry_time_end="14:55",
-                min_distance_to_stop=0.01,
-                max_distance_to_stop=0.15,
+                min_distance_to_stop=0.0,
+                max_distance_to_stop=0.02,
                 min_risk_reward_ratio=RR_RATIO,
                 target_resistance_lookback=60,
             ),
