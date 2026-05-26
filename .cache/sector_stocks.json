@@ -101,97 +101,97 @@
   },
   "002050": {
     "name": "三花智控",
-    "industry": "减速器",
+    "industry": "机器人",
     "baostock_code": "sz.002050"
   },
   "601689": {
     "name": "拓普集团",
-    "industry": "减速器",
+    "industry": "机器人",
     "baostock_code": "sh.601689"
   },
   "603728": {
     "name": "鸣志电器",
-    "industry": "减速器",
+    "industry": "机器人",
     "baostock_code": "sh.603728"
   },
   "002896": {
     "name": "中大力德",
-    "industry": "减速器",
+    "industry": "机器人",
     "baostock_code": "sz.002896"
   },
   "300124": {
     "name": "汇川技术",
-    "industry": "伺服",
+    "industry": "机器人",
     "baostock_code": "sz.300124"
   },
   "002472": {
     "name": "双环传动",
-    "industry": "减速器",
+    "industry": "机器人",
     "baostock_code": "sz.002472"
   },
   "300660": {
     "name": "江苏雷利",
-    "industry": "电机",
+    "industry": "机器人",
     "baostock_code": "sz.300660"
   },
   "603662": {
     "name": "柯力传感",
-    "industry": "传感",
+    "industry": "机器人",
     "baostock_code": "sh.603662"
   },
   "688160": {
     "name": "步科股份",
-    "industry": "伺服",
+    "industry": "机器人",
     "baostock_code": "sh.688160"
   },
   "002527": {
     "name": "新时达",
-    "industry": "本体",
+    "industry": "机器人",
     "baostock_code": "sz.002527"
   },
   "300580": {
     "name": "贝斯特",
-    "industry": "减速器",
+    "industry": "机器人",
     "baostock_code": "sz.300580"
   },
   "301368": {
     "name": "丰立智能",
-    "industry": "减速器",
+    "industry": "机器人",
     "baostock_code": "sz.301368"
   },
   "002031": {
     "name": "巨轮智能",
-    "industry": "本体",
+    "industry": "机器人",
     "baostock_code": "sz.002031"
   },
   "688322": {
     "name": "奥比中光",
-    "industry": "传感",
+    "industry": "机器人",
     "baostock_code": "sh.688322"
   },
   "603583": {
     "name": "捷昌驱动",
-    "industry": "执行器",
+    "industry": "机器人",
     "baostock_code": "sh.603583"
   },
   "603667": {
     "name": "五洲新春",
-    "industry": "减速器",
+    "industry": "机器人",
     "baostock_code": "sh.603667"
   },
   "300503": {
     "name": "昊志机电",
-    "industry": "电机",
+    "industry": "机器人",
     "baostock_code": "sz.300503"
   },
   "002139": {
     "name": "拓邦股份",
-    "industry": "控制",
+    "industry": "机器人",
     "baostock_code": "sz.002139"
   },
   "688320": {
     "name": "禾川科技",
-    "industry": "伺服",
+    "industry": "机器人",
     "baostock_code": "sh.688320"
   }
 }
