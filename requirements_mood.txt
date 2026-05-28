@@ -1,0 +1,4 @@
+# 连板题材热力图 —— 依赖声明
+# 安装: pip install -r requirements_mood.txt
+akshare>=1.12.0
+pandas>=2.0.0
