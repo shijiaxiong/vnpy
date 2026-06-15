@@ -5,11 +5,13 @@ from .config import (
     RiskConfig,
     StrategyConfig,
     LimitUpConfig,
+    BrokenBoardConfig,
 )
 
 from .selector import (
     StockSelector,
     LimitUpSelector,
+    BrokenBoardSelector,
     CompositeSelector,
 )
 
@@ -35,9 +37,11 @@ __all__ = [
     "RiskConfig",
     "StrategyConfig",
     "LimitUpConfig",
+    "BrokenBoardConfig",
     # Selector interface
     "StockSelector",
     "LimitUpSelector",
+    "BrokenBoardSelector",
     "CompositeSelector",
     # Module 1
     "SectorLeaderSelector",

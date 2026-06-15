@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List
 
-from .selector import LimitUpConfig
+from .selector import LimitUpConfig, BrokenBoardConfig
 
 
 @dataclass
@@ -156,8 +156,10 @@ class StrategyConfig:
     max_trades_per_day: int = 3
     """每日最多交易次数"""
     selector_type: str = "leader"
-    """筛选器类型: "leader" | "limit_up" | "composite" """
+    """筛选器类型: "leader" | "limit_up" | "broken_board" | "composite" """
     limit_up_config: LimitUpConfig = field(default_factory=LimitUpConfig)
     """涨停筛选配置（selector_type="limit_up" 或 chain 中包含 "limit_up" 时生效）"""
+    broken_board_config: BrokenBoardConfig = field(default_factory=BrokenBoardConfig)
+    """断板筛选配置（selector_type="broken_board" 或 chain 中包含 "broken_board" 时生效）"""
     selector_chain: List[str] = field(default_factory=list)
-    """串联筛选器链配置（selector_type="composite" 时生效），如 ["limit_up", "leader"]"""
+    """串联筛选器链配置（selector_type="composite" 时生效），如 ["broken_board", "leader"]"""

@@ -38,7 +38,7 @@ from .config import StrategyConfig
 from .entry_signal import EntrySignalChecker
 from .leader_selector import SectorLeaderSelector
 from .risk_manager import RiskManager
-from .selector import StockSelector, LimitUpSelector, LimitUpConfig, CompositeSelector
+from .selector import StockSelector, LimitUpSelector, LimitUpConfig, BrokenBoardSelector, BrokenBoardConfig, CompositeSelector
 
 
 class YuanjunDataSource(metaclass=ABCMeta):
@@ -445,14 +445,19 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
         cfg.selector_type:
           - "leader"（默认）: SectorLeaderSelector，板块龙头多维打分
           - "limit_up": LimitUpSelector，涨停板个股筛选
+          - "broken_board": BrokenBoardSelector，涨停断板个股筛选
           - "composite": CompositeSelector，串联多个筛选器
-            （需设置 cfg.selector_chain 为 ["limit_up", "leader"] 等）
+            （需设置 cfg.selector_chain 为 ["broken_board", "leader"] 等）
         """
         stype = getattr(cfg, "selector_type", "leader")
 
         if stype == "limit_up":
             lc = getattr(cfg, "limit_up_config", LimitUpConfig())
             return LimitUpSelector(lc)
+
+        if stype == "broken_board":
+            bc = getattr(cfg, "broken_board_config", BrokenBoardConfig())
+            return BrokenBoardSelector(bc)
 
         if stype == "composite":
             chain_types = getattr(cfg, "selector_chain", [])
@@ -461,6 +466,9 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
                 if t == "limit_up":
                     lc = getattr(cfg, "limit_up_config", LimitUpConfig())
                     selectors.append(LimitUpSelector(lc))
+                elif t == "broken_board":
+                    bc = getattr(cfg, "broken_board_config", BrokenBoardConfig())
+                    selectors.append(BrokenBoardSelector(bc))
                 elif t == "leader":
                     selectors.append(SectorLeaderSelector(cfg.leader_config))
                 else:

@@ -233,6 +233,219 @@ class LimitUpSelector(StockSelector):
 
 
 # ================================================================
+# 断板筛选（冲板未封）
+# ================================================================
+
+@dataclass
+class BrokenBoardConfig:
+    """断板筛选配置
+
+    断板定义：当日最高价触及涨停线（≥limit_up_line），但收盘未封住（收盘涨幅<limit_up_line），
+    即"冲板未封"。这种走势代表多空分歧剧烈，往往是短线介入点或顶部信号。
+
+    断板 vs 炸板：
+    - 炸板：盘中从涨停打到非涨停，通常伴随巨量，偏空
+    - 断板：最高触及涨停但全天从未封死，偏中性，需结合其他条件判断
+    """
+
+    limit_up_line: float = 0.095
+    """涨停线（9.5%，放宽覆盖未封死的票）"""
+
+    min_daily_return: float = 0.03
+    """最小收盘涨幅（3%），排除冲高回落太惨的票"""
+
+    max_consecutive_limits_before: int = 1
+    """断板前最多连续涨停天数（0=首板断板, 1=允许1连板后断板），排除高位连板后断板"""
+
+    min_turnover: float = 5.0
+    """最小换手率（%），断板需要充分换手才有意义"""
+
+    min_volume_ratio: float = 1.5
+    """最小量比（当日量/5日均量），放量断板更有分析价值"""
+
+    top_n: int = 5
+    """最多返回前N只"""
+
+
+class BrokenBoardSelector(StockSelector):
+    """断板个股筛选器
+
+    筛选当日触及涨停但未封住的个股（冲板未封），
+    排除连续一字板后断板的高位品种，按换手率和量比排序。
+
+    Attributes
+    ----------
+    last_details : Dict[str, Dict]
+        最近一次筛选详情，用于调试
+    """
+
+    def __init__(self, config: Optional[BrokenBoardConfig] = None) -> None:
+        self.config = config or BrokenBoardConfig()
+        self.last_details: Dict[str, Dict] = {}
+
+    def select(
+        self,
+        stock_data: Dict[str, pd.DataFrame],
+        **kwargs,
+    ) -> Tuple[List[str], Dict]:
+        """执行断板筛选
+
+        流程：
+        1. 检查当日最高价是否触及涨停线
+        2. 检查收盘是否未封住（收盘涨幅 < 涨停线）
+        3. 收盘涨幅需 >= min_daily_return（排除冲高大幅回落）
+        4. 排除断板前连续涨停天数 > max_consecutive_limits_before
+        5. 换手率/量比过滤
+        6. 按得分排序
+
+        Parameters
+        ----------
+        stock_data : Dict[str, pd.DataFrame]
+            {股票代码: 日线DataFrame}
+
+        Returns
+        -------
+        Tuple[List[str], Dict]
+            (断板候选代码列表, 各候选详情)
+        """
+        cfg = self.config
+        candidates: Dict[str, Dict] = {}
+        self.last_details = {}
+
+        for code, df in stock_data.items():
+            if len(df) < 5:
+                continue
+
+            prev_close = float(df["close"].iloc[-2]) if len(df) >= 2 else 0.0
+            if prev_close <= 0:
+                continue
+
+            today_open = float(df["open"].iloc[-1])
+            today_high = float(df["high"].iloc[-1])
+            today_close = float(df["close"].iloc[-1])
+            today_low = float(df["low"].iloc[-1])
+
+            limit_up_price = prev_close * 1.10  # A股涨停价（10%）
+            high_return = (today_high - prev_close) / prev_close
+            close_return = (today_close - prev_close) / prev_close
+            upper_shadow = (today_high - max(today_close, today_open)) / today_high if today_high > 0 else 0
+
+            # 条件1：最高价触及涨停线
+            if high_return < cfg.limit_up_line:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"最高涨幅{high_return:.2%} < 涨停线{cfg.limit_up_line:.0%}",
+                }
+                continue
+
+            # 条件2：收盘未封住（这里用 close_return 判断，允许小幅误差）
+            if close_return >= cfg.limit_up_line:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"收盘涨幅{close_return:.2%} >= 涨停线{cfg.limit_up_line:.0%}，已封板非断板",
+                }
+                continue
+
+            # 条件3：收盘涨幅达标（排除冲高大幅回落）
+            if close_return < cfg.min_daily_return:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"收盘涨幅{close_return:.2%} < 最低要求{cfg.min_daily_return:.0%}，冲高回落过惨",
+                }
+                continue
+
+            # 条件4：断板前连续涨停天数检查（从df倒推，不含当前日）
+            consecutive_before = self._count_consecutive_limits_before(df)
+            if consecutive_before > cfg.max_consecutive_limits_before:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"断板前已连续涨停{consecutive_before}天 > 阈值{cfg.max_consecutive_limits_before}天",
+                }
+                continue
+
+            # 条件5：换手率
+            turnover = float(df["turnover"].iloc[-1])
+            if turnover < cfg.min_turnover:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"换手率{turnover:.1f}% < 阈值{cfg.min_turnover}%",
+                }
+                continue
+
+            # 条件6：量比
+            volume = float(df["volume"].iloc[-1])
+            avg_vol_5d = float(df["volume"].iloc[-6:-1].mean()) if len(df) >= 6 else volume
+            volume_ratio = volume / avg_vol_5d if avg_vol_5d > 0 else 1.0
+            if volume_ratio < cfg.min_volume_ratio:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"量比{volume_ratio:.2f} < 阈值{cfg.min_volume_ratio:.1f}",
+                }
+                continue
+
+            # ---- 综合评分 ----
+            # 封板力度（high越接近涨停越好）
+            board_strength = min(high_return / 0.10, 1.0)
+            # 收盘留存度（close越接近high越好，说明没被砸太惨）
+            close_retention = max(0, 1.0 - upper_shadow / 0.10)
+            # 量比得分
+            vol_score = min(volume_ratio / 3.0, 1.0)
+            # 换手适中得分（5%-20%区间最优）
+            if 5 <= turnover <= 20:
+                turnover_score = 1.0
+            elif turnover < 5:
+                turnover_score = turnover / 5.0
+            else:
+                turnover_score = max(0, 1 - (turnover - 20) / 20)
+
+            total_score = (
+                board_strength * 0.25
+                + close_retention * 0.35
+                + vol_score * 0.25
+                + turnover_score * 0.15
+            )
+
+            detail = {
+                "passed": True,
+                "prev_close": round(prev_close, 2),
+                "limit_up_price": round(limit_up_price, 2),
+                "high_return": round(high_return, 4),
+                "close_return": round(close_return, 4),
+                "upper_shadow": round(upper_shadow, 4),
+                "turnover": round(turnover, 2),
+                "volume_ratio": round(volume_ratio, 2),
+                "consecutive_before": consecutive_before,
+                "total_score": round(total_score, 4),
+            }
+            self.last_details[code] = detail
+            candidates[code] = detail
+
+        # 按得分排序取前N
+        sorted_codes = sorted(candidates, key=lambda c: candidates[c]["total_score"], reverse=True)
+        selected = sorted_codes[: cfg.top_n]
+
+        details = {code: self.last_details.get(code, {}) for code in selected}
+        return selected, details
+
+    def _count_consecutive_limits_before(self, df: pd.DataFrame) -> int:
+        """计算断板日之前（不含当日）的连续涨停天数"""
+        count = 0
+        threshold = self.config.limit_up_line
+        # 从倒数第2天开始往前数（倒数第1天是当天=断板日）
+        for i in range(len(df) - 2, -1, -1):
+            close = float(df["close"].iloc[i])
+            prev = float(df["close"].iloc[i - 1]) if i > 0 else 0.0
+            if prev <= 0:
+                break
+            ret = (close - prev) / prev
+            if ret >= threshold:
+                count += 1
+            else:
+                break
+        return count
+
+
+# ================================================================
 # 串联筛选器
 # ================================================================
 
