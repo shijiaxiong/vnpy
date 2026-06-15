@@ -5,7 +5,7 @@
 
 六个条件：
 1. 回调幅度 ≥ 阈值（默认8%，可调至15%）
-2. 最近10日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
+2. 最近3日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
 3. 股价在撤军线上方不超过阈值（窄幅筑底）
 4. 股价站上250日均线（年线，过滤下跌趋势股）
 5. MACD BAR 连续回升（空头力量减弱确认，可通过 enable_macd_convergence 关闭）
@@ -32,7 +32,7 @@ class BottomPatternRecognizer:
 
     逐条检查六个条件：
     1. 回调幅度 ≥ 阈值
-    2. 最近10日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
+    2. 最近3日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
     3. 股价在撤军线（止损线）上方不超过阈值（窄幅筑底）
     4. 股价站上250日均线（年线，过滤下跌趋势股）
     5. MACD BAR 连续回升（空头力量减弱确认）
@@ -110,7 +110,7 @@ class BottomPatternRecognizer:
         if not passed:
             return False, result
 
-        # 条件2：最近10日价格平稳（无大阳线且无大阴线）
+        # 条件2：最近3日价格平稳（无大阳线且无大阴线）
         passed, spike_info = self._check_stable_price(df)
         result.update(spike_info)
         if not passed:
@@ -188,7 +188,7 @@ class BottomPatternRecognizer:
     # ------------------------------------------------------------------
 
     def _check_stable_price(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
-        """检查最近10日内价格是否平稳
+        """检查最近3日内价格是否平稳
 
         同时排除大阳线（>6%）和大阴线（<-6%），
         两者都是底部不稳定的信号。
@@ -199,7 +199,7 @@ class BottomPatternRecognizer:
             (是否通过, {"has_price_spike": bool, "spike_max_abs_pct": float,
                         "spike_type": str})
         """
-        recent = df.iloc[-10:]
+        recent = df.iloc[-3:]
         max_abs_pct = 0.0
         spike_type = ""  # "" | "yang" | "yin"
 
