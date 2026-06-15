@@ -123,10 +123,13 @@ class BottomPatternRecognizer:
             return False, result
 
         # 条件4：股价站上250日均线（年线，过滤下跌趋势股）
-        passed, ma250_info = self._check_above_ma250(df)
-        result.update(ma250_info)
-        if not passed:
-            return False, result
+        if self.config.above_ma250:
+            passed, ma250_info = self._check_above_ma250(df)
+            result.update(ma250_info)
+            if not passed:
+                return False, result
+        else:
+            result["ma250"] = "disabled"
 
         # 条件5：MACD BAR收敛（空头力量减弱确认）
         passed, macd_info = self._check_macd_convergence(df)
@@ -193,13 +196,15 @@ class BottomPatternRecognizer:
         同时排除大阳线（>6%）和大阴线（<-6%），
         两者都是底部不稳定的信号。
 
+        注意：跳过最新日（当前交易日），因为断板日本身就可能有大波动，检查前3日即可。
+
         Returns
         -------
         Tuple[bool, Dict]
             (是否通过, {"has_price_spike": bool, "spike_max_abs_pct": float,
                         "spike_type": str})
         """
-        recent = df.iloc[-3:]
+        recent = df.iloc[-4:-1] if len(df) >= 4 else df.iloc[:-1]
         max_abs_pct = 0.0
         spike_type = ""  # "" | "yang" | "yin"
 

@@ -257,6 +257,16 @@ class BrokenBoardConfig:
     max_consecutive_limits_before: int = -1
     """断板前最多连续涨停天数，-1=不限制。0=断板前无涨停(首板断板)，7=7天7板也放行"""
 
+    # 窗口涨停计数（非连续）
+    limit_window_days: int = 7
+    """涨停计数窗口（天）。统计最近N个交易日内的涨停天数（含当日），默认7天"""
+
+    min_limits_in_window: int = 0
+    """窗口内最少涨停天数，0=不限制。如设4则要求"7天4板"以上的高位股"""
+
+    max_limits_in_window: int = -1
+    """窗口内最多涨停天数，-1=不限制。如设3则排除"7天4板"以上过热股"""
+
     min_turnover: float = 5.0
     """最小换手率（%），断板需要充分换手才有意义"""
 
@@ -294,7 +304,8 @@ class BrokenBoardSelector(StockSelector):
         1. 检查当日最高价是否触及涨停线
         2. 检查收盘是否未封住（收盘涨幅 < 涨停线）
         3. 收盘涨幅需 >= min_daily_return（排除冲高大幅回落）
-        4. 排除断板前连续涨停天数 > max_consecutive_limits_before（-1=不限制）
+        4a. 排除断板前连续涨停天数 > max_consecutive_limits_before（-1=不限制）
+        4b. 窗口内涨停天数（min/max_limits_in_window，0/-1=不限制）
         5. 换手率/量比过滤
         6. 按得分排序
 
@@ -364,6 +375,21 @@ class BrokenBoardSelector(StockSelector):
                 }
                 continue
 
+            # 条件4b：窗口内涨停天数（非连续，如"7天4板"）
+            limits_in_window = self._count_limits_in_window(df)
+            if cfg.min_limits_in_window > 0 and limits_in_window < cfg.min_limits_in_window:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"近{cfg.limit_window_days}天仅{limits_in_window}板 < 最少{cfg.min_limits_in_window}板",
+                }
+                continue
+            if cfg.max_limits_in_window >= 0 and limits_in_window > cfg.max_limits_in_window:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"近{cfg.limit_window_days}天{limits_in_window}板 > 最多{cfg.max_limits_in_window}板",
+                }
+                continue
+
             # 条件5：换手率
             turnover = float(df["turnover"].iloc[-1])
             if turnover < cfg.min_turnover:
@@ -416,6 +442,7 @@ class BrokenBoardSelector(StockSelector):
                 "turnover": round(turnover, 2),
                 "volume_ratio": round(volume_ratio, 2),
                 "consecutive_before": consecutive_before,
+                "limits_in_window": limits_in_window,
                 "total_score": round(total_score, 4),
             }
             self.last_details[code] = detail
@@ -443,6 +470,30 @@ class BrokenBoardSelector(StockSelector):
                 count += 1
             else:
                 break
+        return count
+
+    def _count_limits_in_window(self, df: pd.DataFrame) -> int:
+        """统计近N个交易日内涨停天数（含当日，非连续）
+
+        例如"板-板-板-涨5%-板-跌-板"在7天内 = 5板。
+
+        Returns
+        -------
+        int
+            窗口内涨停天数
+        """
+        window = self.config.limit_window_days
+        threshold = self.config.limit_up_line
+        recent = df.iloc[-window:] if len(df) >= window else df
+        count = 0
+        for i in range(1, len(recent)):
+            prev = float(recent["close"].iloc[i - 1])
+            cur = float(recent["close"].iloc[i])
+            if prev <= 0:
+                continue
+            ret = (cur - prev) / prev
+            if ret >= threshold:
+                count += 1
         return count
 
 
