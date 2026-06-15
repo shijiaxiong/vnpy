@@ -38,6 +38,7 @@ from .config import StrategyConfig
 from .entry_signal import EntrySignalChecker
 from .leader_selector import SectorLeaderSelector
 from .risk_manager import RiskManager
+from .selector import StockSelector, LimitUpSelector, LimitUpConfig, CompositeSelector
 
 
 class YuanjunDataSource(metaclass=ABCMeta):
@@ -122,7 +123,7 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
         cfg = self.strategy_config
 
         # 子模块
-        self.leader_selector: SectorLeaderSelector = SectorLeaderSelector(cfg.leader_config)
+        self.selector: StockSelector = self._build_selector(cfg)
         self.pattern_recognizer: BottomPatternRecognizer = BottomPatternRecognizer(cfg.bottom_config)
         self.entry_checker: EntrySignalChecker = EntrySignalChecker(cfg.entry_config)
         self.risk_manager: RiskManager = RiskManager(cfg.risk_config)
@@ -335,19 +336,17 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
         stock_data: Dict[str, pd.DataFrame],
         today: datetime,
     ) -> Tuple[List[str], Dict]:
-        """执行龙头筛选"""
+        """执行股票筛选（通过 StockSelector 统一接口）"""
         date_str = today.strftime("%Y-%m-%d")
 
         sector_data = self._get_sector_data(date_str)
-        if sector_data is None or sector_data.empty:
-            return [], {"error": "无板块数据"}
-
         fundamental_data = self._get_fundamental_data(date_str)
 
-        leaders, details = self.leader_selector.select_leaders(
-            stock_data, sector_data, fundamental_data
+        return self.selector.select(
+            stock_data,
+            sector_data=sector_data,
+            fundamental_data=fundamental_data,
         )
-        return leaders, details
 
     # ================================================================
     # 内部：入场评估
@@ -437,6 +436,41 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
         self.positions.pop(vt_symbol, None)
 
     # ================================================================
+    # 筛选器工厂
+    # ================================================================
+
+    def _build_selector(self, cfg: StrategyConfig) -> StockSelector:
+        """根据配置构建 StockSelector 实例
+
+        cfg.selector_type:
+          - "leader"（默认）: SectorLeaderSelector，板块龙头多维打分
+          - "limit_up": LimitUpSelector，涨停板个股筛选
+          - "composite": CompositeSelector，串联多个筛选器
+            （需设置 cfg.selector_chain 为 ["limit_up", "leader"] 等）
+        """
+        stype = getattr(cfg, "selector_type", "leader")
+
+        if stype == "limit_up":
+            lc = getattr(cfg, "limit_up_config", LimitUpConfig())
+            return LimitUpSelector(lc)
+
+        if stype == "composite":
+            chain_types = getattr(cfg, "selector_chain", [])
+            selectors: List[StockSelector] = []
+            for t in chain_types:
+                if t == "limit_up":
+                    lc = getattr(cfg, "limit_up_config", LimitUpConfig())
+                    selectors.append(LimitUpSelector(lc))
+                elif t == "leader":
+                    selectors.append(SectorLeaderSelector(cfg.leader_config))
+                else:
+                    raise ValueError(f"未知筛选器类型: {t}")
+            return CompositeSelector(selectors)
+
+        # 默认：板块龙头筛选（向后兼容）
+        return SectorLeaderSelector(cfg.leader_config)
+
+    # ================================================================
     # 数据源
     # ================================================================
 
@@ -471,9 +505,9 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
     def _apply_manual_filters(self) -> None:
         """应用人工黑/白名单"""
         if self.manual_blacklist:
-            self.leader_selector.set_blacklist(self.manual_blacklist)
+            self.selector.set_blacklist(self.manual_blacklist)
         if self.manual_whitelist:
-            self.leader_selector.set_whitelist(self.manual_whitelist)
+            self.selector.set_whitelist(self.manual_whitelist)
 
     def exclude_symbols(self, codes: List[str]) -> None:
         """手工排除标的
@@ -488,8 +522,8 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
         """
         existing = list(self.manual_blacklist) if isinstance(self.manual_blacklist, list) else []
         self.manual_blacklist = list(set(existing + codes))
-        if hasattr(self, "leader_selector"):
-            self.leader_selector.set_blacklist(self.manual_blacklist)
+        if hasattr(self, "selector"):
+            self.selector.set_blacklist(self.manual_blacklist)
         for code in codes:
             if code in self.positions:
                 self.set_target(code, 0)
@@ -504,8 +538,8 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
         """
         existing = list(self.manual_whitelist) if isinstance(self.manual_whitelist, list) else []
         self.manual_whitelist = list(set(existing + codes))
-        if hasattr(self, "leader_selector"):
-            self.leader_selector.set_whitelist(self.manual_whitelist)
+        if hasattr(self, "selector"):
+            self.selector.set_whitelist(self.manual_whitelist)
 
     def connect_data_source(self, source: YuanjunDataSource) -> None:
         """连接外部数据源（预留扩展位）
@@ -542,7 +576,8 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
         print(f"\n{'=' * 55}")
         print(f"  援军战法策略摘要")
         print(f"{'=' * 55}")
-        print(f"  龙头筛选: 前{cfg.leader_config.top_n}名")
+        print(f"  筛选类型: {cfg.selector_type}")
+        print(f"  筛选详情: {self.selector.__class__.__name__}")
         print(f"  形态识别: 回调≥{cfg.bottom_config.down_amplitude_min:.0%}, |日涨跌|≤{cfg.bottom_config.price_spike_threshold:.0%}, 冷却{cfg.bottom_config.cooldown_days}天, 打断阈值{cfg.bottom_config.cooldown_interrupt_threshold:.0%}")
         print(f"  入场条件: 盈亏比≥{cfg.entry_config.min_risk_reward_ratio}")
         print(f"  风控止损: {cfg.risk_config.stop_loss_pct:.0%}")

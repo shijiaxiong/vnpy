@@ -16,12 +16,13 @@ from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import pandas as pd
 
 from .config import LeaderConfig
+from .selector import StockSelector
 
 if TYPE_CHECKING:
     from scripts.flow_factor import ScoreAdjuster
 
 
-class SectorLeaderSelector:
+class SectorLeaderSelector(StockSelector):
     """板块龙头识别器
 
     对板块内所有股票进行多维度打分排序，筛选出龙头候选。
@@ -197,6 +198,25 @@ class SectorLeaderSelector:
         self.last_details = details
 
         return leader_codes, {c: details[c] for c in leader_codes if c in details}
+
+    # ------------------------------------------------------------------
+    # StockSelector 接口实现
+    # ------------------------------------------------------------------
+
+    def select(
+        self,
+        stock_data: Dict[str, pd.DataFrame],
+        **kwargs,
+    ) -> Tuple[List[str], Dict[str, Dict]]:
+        """StockSelector 统一接口
+
+        委托给 select_leaders，从 **kwargs 中提取额外参数。
+        """
+        return self.select_leaders(
+            stock_data,
+            sector_data=kwargs.get("sector_data", pd.DataFrame({"close": []})),
+            fundamental_data=kwargs.get("fundamental_data"),
+        )
 
     def set_blacklist(self, codes: List[str]) -> None:
         """设置人工黑名单

@@ -1,4 +1,7 @@
 from dataclasses import dataclass, field
+from typing import List
+
+from .selector import LimitUpConfig
 
 
 @dataclass
@@ -55,11 +58,13 @@ class BottomPatternConfig:
     """止跌形态识别配置参数
 
     精简版：去掉无区分度的缩量/放量/不创新低等条件。
-    保留+新增有实效的四个条件：
+    保留+新增有实效的条件：
     - 回调幅度（8% → 可调至15%等）
     - 无大阳线/大阴线（6%以上视为不稳定）
-    - 窄幅筑底（股价在10日最低价上方不超过阈值）
+    - 窄幅筑底（股价在撤军线上方不超过阈值）
     - 年线以上运行（站上250日均线，过滤下跌趋势股）
+    - MACD BAR收敛（空头力量减弱确认）
+    - 子板块相对强度（排名前50%）
     
     参考 analyze_bottoms.py 历史数据分析结论：
     - 缩量比/放量比：无区分度（差值<0.11）
@@ -150,3 +155,9 @@ class StrategyConfig:
     """最大持仓天数"""
     max_trades_per_day: int = 3
     """每日最多交易次数"""
+    selector_type: str = "leader"
+    """筛选器类型: "leader" | "limit_up" | "composite" """
+    limit_up_config: LimitUpConfig = field(default_factory=LimitUpConfig)
+    """涨停筛选配置（selector_type="limit_up" 或 chain 中包含 "limit_up" 时生效）"""
+    selector_chain: List[str] = field(default_factory=list)
+    """串联筛选器链配置（selector_type="composite" 时生效），如 ["limit_up", "leader"]"""

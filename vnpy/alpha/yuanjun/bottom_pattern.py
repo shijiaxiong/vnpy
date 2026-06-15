@@ -1,13 +1,15 @@
 """
 模块2：形态识别模块 (BottomPatternRecognizer)
 
-止跌形态识别（四条件版）。
+止跌形态识别（六条件版）。
 
-四个条件：
+六个条件：
 1. 回调幅度 ≥ 阈值（默认8%，可调至15%）
 2. 最近10日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
-3. 股价在10日最低价上方不超过阈值（窄幅筑底）
+3. 股价在撤军线上方不超过阈值（窄幅筑底）
 4. 股价站上250日均线（年线，过滤下跌趋势股）
+5. MACD BAR 连续回升（空头力量减弱确认，可通过 enable_macd_convergence 关闭）
+6. 子板块相对强度排名前50%（可通过 enable_rel_strength_filter 关闭）
 
 大阴线同样视为底部不稳定信号（恐慌盘出逃）。
 大阳线视为透支信号（主力已撤退）。
@@ -26,13 +28,15 @@ from .config import BottomPatternConfig
 
 
 class BottomPatternRecognizer:
-    """止跌形态识别器（四条件版）
+    """止跌形态识别器（六条件版）
 
-    逐条检查四个条件：
+    逐条检查六个条件：
     1. 回调幅度 ≥ 阈值
     2. 最近10日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
     3. 股价在撤军线（止损线）上方不超过阈值（窄幅筑底）
     4. 股价站上250日均线（年线，过滤下跌趋势股）
+    5. MACD BAR 连续回升（空头力量减弱确认）
+    6. 子板块相对强度排名前50%（过滤弱势股）
     """
 
     def __init__(self, config: BottomPatternConfig) -> None:
@@ -118,13 +122,19 @@ class BottomPatternRecognizer:
         if not passed:
             return False, result
 
-        # 条件4：MACD BAR收敛（空头力量减弱确认）
+        # 条件4：股价站上250日均线（年线，过滤下跌趋势股）
+        passed, ma250_info = self._check_above_ma250(df)
+        result.update(ma250_info)
+        if not passed:
+            return False, result
+
+        # 条件5：MACD BAR收敛（空头力量减弱确认）
         passed, macd_info = self._check_macd_convergence(df)
         result.update(macd_info)
         if not passed:
             return False, result
 
-        # 条件5：子板块相对强度（过滤排名后50%的弱势股）
+        # 条件6：子板块相对强度（过滤排名后50%的弱势股）
         passed, rank_info = self._check_relative_strength(rel_strength_rank_pct)
         result.update(rank_info)
         if not passed:
