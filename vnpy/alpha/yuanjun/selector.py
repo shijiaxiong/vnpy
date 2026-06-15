@@ -254,8 +254,8 @@ class BrokenBoardConfig:
     min_daily_return: float = 0.03
     """最小收盘涨幅（3%），排除冲高回落太惨的票"""
 
-    max_consecutive_limits_before: int = 1
-    """断板前最多连续涨停天数（0=首板断板, 1=允许1连板后断板），排除高位连板后断板"""
+    max_consecutive_limits_before: int = -1
+    """断板前最多连续涨停天数，-1=不限制。0=断板前无涨停(首板断板)，7=7天7板也放行"""
 
     min_turnover: float = 5.0
     """最小换手率（%），断板需要充分换手才有意义"""
@@ -294,7 +294,7 @@ class BrokenBoardSelector(StockSelector):
         1. 检查当日最高价是否触及涨停线
         2. 检查收盘是否未封住（收盘涨幅 < 涨停线）
         3. 收盘涨幅需 >= min_daily_return（排除冲高大幅回落）
-        4. 排除断板前连续涨停天数 > max_consecutive_limits_before
+        4. 排除断板前连续涨停天数 > max_consecutive_limits_before（-1=不限制）
         5. 换手率/量比过滤
         6. 按得分排序
 
@@ -355,8 +355,9 @@ class BrokenBoardSelector(StockSelector):
                 continue
 
             # 条件4：断板前连续涨停天数检查（从df倒推，不含当前日）
+            # -1=不限制，允许7天7板/7天5板等任何情况
             consecutive_before = self._count_consecutive_limits_before(df)
-            if consecutive_before > cfg.max_consecutive_limits_before:
+            if cfg.max_consecutive_limits_before >= 0 and consecutive_before > cfg.max_consecutive_limits_before:
                 self.last_details[code] = {
                     "passed": False,
                     "reason": f"断板前已连续涨停{consecutive_before}天 > 阈值{cfg.max_consecutive_limits_before}天",

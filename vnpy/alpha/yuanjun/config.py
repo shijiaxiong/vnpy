@@ -1,7 +1,24 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from .selector import LimitUpConfig, BrokenBoardConfig
+
+
+# ================================================================
+# 援军分类预设
+# ================================================================
+
+_YUANJUN_STYLES: dict = {
+    "band": {
+        "selector_type": "leader",
+        "comment": "波段援军：板块龙头回调止跌后波段介入",
+    },
+    "leader": {
+        "selector_type": "broken_board",
+        "comment": "龙头援军：冲板未封个股断板后回调止跌介入",
+    },
+}
+"""援军战法风格预设。band=波段援军(原版), leader=龙头援军(新版)"""
 
 
 @dataclass
@@ -139,9 +156,19 @@ class RiskConfig:
 class StrategyConfig:
     """策略总配置
 
-    聚合四个子模块的配置，同时包含策略级别的参数。
-    所有阈值均可通过构造参数调整，无需修改代码。
+    聚合子模块配置和策略级别参数。
+    支持通过 strategy_style 快速切换援军分类。
+
+    strategy_style:
+      - "band"（默认）: 波段援军 — 板块龙头回调止跌后波段介入，selector=leader
+      - "leader": 龙头援军 — 冲板未封断板后回调止跌介入，selector=broken_board
     """
+
+    # 援军分类
+    strategy_style: str = "band"
+    """援军分类: "band"=波段援军(原版) | "leader"=龙头援军(新版)"""
+
+    # 子模块配置
 
     leader_config: LeaderConfig = field(default_factory=LeaderConfig)
     """龙头筛选配置"""
@@ -163,3 +190,35 @@ class StrategyConfig:
     """断板筛选配置（selector_type="broken_board" 或 chain 中包含 "broken_board" 时生效）"""
     selector_chain: List[str] = field(default_factory=list)
     """串联筛选器链配置（selector_type="composite" 时生效），如 ["broken_board", "leader"]"""
+
+    # ------------------------------------------------------------------
+    # 工厂方法与风格预设
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def band_style(cls, **overrides) -> "StrategyConfig":
+        """波段援军预设（原版）
+
+        板块龙头多维打分 → 止跌形态 → 尾盘入场。
+        适合中低频波段交易，持仓天数较长。
+        """
+        cfg = cls(strategy_style="band", selector_type="leader")
+        for k, v in overrides.items():
+            setattr(cfg, k, v)
+        return cfg
+
+    @classmethod
+    def leader_style(cls, **overrides) -> "StrategyConfig":
+        """龙头援军预设（新版）
+
+        涨停断板筛选 → 止跌形态 → 尾盘入场。
+        适合短线追涨，持仓天数较短。
+        """
+        cfg = cls(
+            strategy_style="leader",
+            selector_type="broken_board",
+            max_hold_days=5,
+        )
+        for k, v in overrides.items():
+            setattr(cfg, k, v)
+        return cfg
