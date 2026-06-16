@@ -68,11 +68,10 @@ class BottomPatternRecognizer:
         if len(df) < 20:
             return False, {"error": f"数据不足20天（仅{len(df)}天）"}
 
-        # 冷却期检查：用日期追踪，兼容每日切片长度变化
-        # pd.NaT → not triggered yet
+        # 冷却期检查（仅 enable_cooldown=True 时生效）
         cooldown_interrupted = False
         interrupt_reason = ""
-        if pd.notna(self._last_triggered_date):
+        if self.config.enable_cooldown and pd.notna(self._last_triggered_date):
             current_date = df.index[-1]  # DataFrame 最后一行对应的日期
             # 在当前 DataFrame 中查找上次触发日的行号
             triggered_positions = df.index.get_indexer([self._last_triggered_date], method="pad")

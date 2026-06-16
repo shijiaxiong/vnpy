@@ -93,12 +93,14 @@ class BottomPatternConfig:
     """[已移除] 股价在最近10日最低价上方不超过此比例"""
     above_ma250: bool = True
     """是否要求股价站上250日均线（年线）"""
+    enable_cooldown: bool = False
+    """是否启用冷却期，默认False。关闭后每日都可触发，不会因上次触发而沉默"""
     cooldown_days: int = 15
-    """触发后沉默多少个交易日不重复报底"""
+    """[仅enable_cooldown=True时生效] 触发后沉默多少个交易日不重复报底"""
     cooldown_interrupt_threshold: float = 0.05
-    """冷却期内若幅度扩大超过此阈值，打断冷却重新报底（5%）"""
-    enable_macd_convergence: bool = True
-    """是否启用MACD BAR收敛检查（空头力量减弱确认）"""
+    """[仅enable_cooldown=True时生效] 冷却期内若幅度扩大超过此阈值，打断冷却重新报底"""
+    enable_macd_convergence: bool = False
+    """是否启用MACD BAR收敛检查（空头力量减弱确认），默认关闭"""
     macd_convergence_days: int = 2
     """MACD BAR连续回升天数（要求BAR连续N日不创新低且回升）"""
     enable_rel_strength_filter: bool = True
