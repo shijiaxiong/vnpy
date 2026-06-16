@@ -223,7 +223,7 @@ class StrategyConfig:
         )
         cfg.risk_config.stop_loss_pct = 0.05  # 龙头援军止损放宽至5%
         cfg.risk_config.max_consecutive_losses = 0  # 0=禁用连亏熔断
-        cfg.entry_config.max_distance_to_stop = 0.08  # 匹配5%止损，距离上限8%
+        cfg.entry_config.max_distance_to_stop = 0.03  # 距止损线≤3%才入场
         for k, v in overrides.items():
             setattr(cfg, k, v)
         return cfg
