@@ -233,29 +233,35 @@ class LimitUpSelector(StockSelector):
 
 
 # ================================================================
-# 断板筛选（冲板未封）
+# 断板筛选（前N日连板+今日不再涨停）
 # ================================================================
 
 @dataclass
 class BrokenBoardConfig:
     """断板筛选配置
 
-    断板定义：当日最高价触及涨停线（≥limit_up_line），但收盘未封住（收盘涨幅<limit_up_line），
-    即"冲板未封"。这种走势代表多空分歧剧烈，往往是短线介入点或顶部信号。
+    断板定义：前N日连续涨停（≥limit_up_line），今日收盘不再涨停（收盘涨幅<limit_up_line）。
+    即"连板后断板"，代表连板动能中断，回调止跌后有机会二次启动。
 
-    断板 vs 炸板：
-    - 炸板：盘中从涨停打到非涨停，通常伴随巨量，偏空
-    - 断板：最高触及涨停但全天从未封死，偏中性，需结合其他条件判断
+    与旧版"冲板未封"的区别：
+    - 旧：当日最高触及涨停但未封死，不要求前日涨停
+    - 新：前N日必须连续涨停，今日不再涨停即可（不要求冲板）
     """
 
     limit_up_line: float = 0.095
-    """涨停线（9.5%，放宽覆盖未封死的票）"""
+    """涨停线（9.5%，判断涨停/断板的分界线）"""
 
-    min_daily_return: float = 0.03
-    """最小收盘涨幅（3%），排除冲高回落太惨的票"""
+    min_consecutive_limits_before: int = 1
+    """断板前最少连续涨停天数，默认1=≥1板，0板走B方案兜底"""
 
     max_consecutive_limits_before: int = -1
-    """断板前最多连续涨停天数，-1=不限制。0=断板前无涨停(首板断板)，7=7天7板也放行"""
+    """断板前最多连续涨停天数，-1=不限制。如设3则排除4连板以上的高位股"""
+
+    min_recent_gain_pct: float = 0.05
+    """近N天累计涨幅阈值（5%），替代涨停要求，捕获无涨停的反弹票"""
+
+    recent_gain_days: int = 3
+    """统计近期涨幅的天数"""
 
     # 窗口涨停计数（非连续）
     limit_window_days: int = 7
@@ -267,21 +273,30 @@ class BrokenBoardConfig:
     max_limits_in_window: int = -1
     """窗口内最多涨停天数，-1=不限制。如设3则排除"7天4板"以上过热股"""
 
-    min_turnover: float = 5.0
-    """最小换手率（%），断板需要充分换手才有意义"""
+    min_turnover: float = 0.0
+    """最小换手率（%），默认0=关闭。连续涨停后可能一字闷杀，换手率归零也要捕获"""
 
-    min_volume_ratio: float = 1.5
-    """最小量比（当日量/5日均量），放量断板更有分析价值"""
+    min_volume_ratio: float = 0.0
+    """最小量比（当日量/5日均量），默认0=关闭。回测后根据效果再决定是否启用"""
 
-    top_n: int = 5
+    top_n: int = 10
     """最多返回前N只"""
+
+    exclude_st: bool = True
+    """是否排除ST股票，默认True。ST股涨跌停幅度为5%，不适用援军战法"""
+
+    exclude_star: bool = True
+    """是否排除科创板(688)，默认True。科创板涨跌停20%"""
+
+    exclude_bse: bool = True
+    """是否排除北交所(83/87/43/46开头)，默认True。北交所涨跌停30%"""
 
 
 class BrokenBoardSelector(StockSelector):
     """断板个股筛选器
 
-    筛选当日触及涨停但未封住的个股（冲板未封），
-    排除连续一字板后断板的高位品种，按换手率和量比排序。
+    筛选"前N日连续涨停 + 今日不再涨停"的个股。
+    排除连板数过多的过热品种，按涨幅/留存度/量比/换手率排序。
 
     Attributes
     ----------
@@ -289,8 +304,9 @@ class BrokenBoardSelector(StockSelector):
         最近一次筛选详情，用于调试
     """
 
-    def __init__(self, config: Optional[BrokenBoardConfig] = None) -> None:
+    def __init__(self, config: Optional[BrokenBoardConfig] = None, name_map: Optional[Dict[str, str]] = None) -> None:
         self.config = config or BrokenBoardConfig()
+        self.name_map = name_map or {}
         self.last_details: Dict[str, Dict] = {}
 
     def select(
@@ -301,11 +317,10 @@ class BrokenBoardSelector(StockSelector):
         """执行断板筛选
 
         流程：
-        1. 检查当日最高价是否触及涨停线
-        2. 检查收盘是否未封住（收盘涨幅 < 涨停线）
-        3. 收盘涨幅需 >= min_daily_return（排除冲高大幅回落）
-        4a. 排除断板前连续涨停天数 > max_consecutive_limits_before（-1=不限制）
-        4b. 窗口内涨停天数（min/max_limits_in_window，0/-1=不限制）
+        1. 检查前N日是否连续涨停（≥min_consecutive_limits_before）
+        2. 检查今日是否不再涨停（收盘涨幅 < limit_up_line）
+        3. 排除连板数超过 max_consecutive_limits_before 的过热股（-1=不限制）
+        4. 窗口内涨停天数（min/max_limits_in_window，0/-1=不限制）
         5. 换手率/量比过滤
         6. 按得分排序
 
@@ -331,47 +346,83 @@ class BrokenBoardSelector(StockSelector):
             if prev_close <= 0:
                 continue
 
+            # ST 过滤：ST/*ST 股票涨跌停 5%，不适用 10% 涨停线
+            if cfg.exclude_st and self.name_map:
+                name = self.name_map.get(code, "")
+                if "ST" in name:
+                    self.last_details[code] = {
+                        "passed": False,
+                        "reason": f"ST股票({name})，涨跌停5%不适用援军战法",
+                    }
+                    continue
+
+            # 科创板过滤：688xxx 涨跌停 20%
+            if cfg.exclude_star and (code.startswith("688") or code.startswith("689")):
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": "科创板(688)，涨跌停20%不适用10%涨停线",
+                }
+                continue
+
+            # 北交所过滤：83/87/43/46 开头，涨跌停 30%
+            if cfg.exclude_bse and (code.startswith(("83", "87", "43", "46"))):
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": "北交所，涨跌停30%不适用10%涨停线",
+                }
+                continue
+
             today_open = float(df["open"].iloc[-1])
             today_high = float(df["high"].iloc[-1])
             today_close = float(df["close"].iloc[-1])
-            today_low = float(df["low"].iloc[-1])
 
             limit_up_price = prev_close * 1.10  # A股涨停价（10%）
-            high_return = (today_high - prev_close) / prev_close
             close_return = (today_close - prev_close) / prev_close
             upper_shadow = (today_high - max(today_close, today_open)) / today_high if today_high > 0 else 0
 
-            # 条件1：最高价触及涨停线
-            if high_return < cfg.limit_up_line:
-                self.last_details[code] = {
-                    "passed": False,
-                    "reason": f"最高涨幅{high_return:.2%} < 涨停线{cfg.limit_up_line:.0%}",
-                }
-                continue
+            # 条件1：涨停势能 — 有连板或近期涨幅兜底
+            consecutive_before = self._count_consecutive_limits_before(df)
+            has_limit_up = consecutive_before >= cfg.min_consecutive_limits_before if cfg.min_consecutive_limits_before > 0 else consecutive_before > 0
 
-            # 条件2：收盘未封住（这里用 close_return 判断，允许小幅误差）
+            if not has_limit_up:
+                if consecutive_before > 0:
+                    # 有连板但不够 min → 排除
+                    self.last_details[code] = {
+                        "passed": False,
+                        "reason": f"仅连板{consecutive_before}天 < 最少{cfg.min_consecutive_limits_before}天，涨停势能不足",
+                    }
+                    continue
+                # consecutive_before == 0: 无任何涨停
+                if cfg.min_consecutive_limits_before > 0:
+                    # 要求有涨停但无 → 排除（min>0 时关闭 B 方案）
+                    self.last_details[code] = {
+                        "passed": False,
+                        "reason": f"无涨停，且要求最少{cfg.min_consecutive_limits_before}连板",
+                    }
+                    continue
+                # min=0 时 B 方案兜底：近 N 日累计涨幅
+                recent_gain = self._calc_recent_gain(df, cfg.recent_gain_days)
+                if recent_gain < cfg.min_recent_gain_pct:
+                    self.last_details[code] = {
+                        "passed": False,
+                        "reason": f"无涨停且近{cfg.recent_gain_days}天涨幅{recent_gain:.1%} < {cfg.min_recent_gain_pct:.0%}",
+                    }
+                    continue
+
+            # 条件2：今日不再涨停（收盘涨幅 < 涨停线）
             if close_return >= cfg.limit_up_line:
                 self.last_details[code] = {
                     "passed": False,
-                    "reason": f"收盘涨幅{close_return:.2%} >= 涨停线{cfg.limit_up_line:.0%}，已封板非断板",
+                    "reason": f"收盘涨幅{close_return:.2%} >= 涨停线{cfg.limit_up_line:.0%}，仍在涨停非断板",
                 }
                 continue
 
-            # 条件3：收盘涨幅达标（排除冲高大幅回落）
-            if close_return < cfg.min_daily_return:
-                self.last_details[code] = {
-                    "passed": False,
-                    "reason": f"收盘涨幅{close_return:.2%} < 最低要求{cfg.min_daily_return:.0%}，冲高回落过惨",
-                }
-                continue
-
-            # 条件4：断板前连续涨停天数检查（从df倒推，不含当前日）
-            # -1=不限制，允许7天7板/7天5板等任何情况
-            consecutive_before = self._count_consecutive_limits_before(df)
+            # 条件3：连续涨停天数上限检查
+            # -1=不限制，允许任何天数
             if cfg.max_consecutive_limits_before >= 0 and consecutive_before > cfg.max_consecutive_limits_before:
                 self.last_details[code] = {
                     "passed": False,
-                    "reason": f"断板前已连续涨停{consecutive_before}天 > 阈值{cfg.max_consecutive_limits_before}天",
+                    "reason": f"已连续涨停{consecutive_before}天 > 上限{cfg.max_consecutive_limits_before}天，过热排除",
                 }
                 continue
 
@@ -410,9 +461,9 @@ class BrokenBoardSelector(StockSelector):
                 }
                 continue
 
-            # ---- 综合评分 ----
-            # 封板力度（high越接近涨停越好）
-            board_strength = min(high_return / 0.10, 1.0)
+            # ---- 综合评分（五维） ----
+            # 今日涨幅得分（close_return / 10%，越高越好，上限1.0）
+            return_score = min(close_return / 0.10, 1.0)
             # 收盘留存度（close越接近high越好，说明没被砸太惨）
             close_retention = max(0, 1.0 - upper_shadow / 0.10)
             # 量比得分
@@ -424,25 +475,35 @@ class BrokenBoardSelector(StockSelector):
                 turnover_score = turnover / 5.0
             else:
                 turnover_score = max(0, 1 - (turnover - 20) / 20)
+            # 连板人气得分（consecutive_before / 3，3板满分）
+            # 连板人气得分 — 非线性跳变，拉开连板差距
+            if consecutive_before <= 0:
+                board_score = 0.0
+            elif consecutive_before == 1:
+                board_score = 0.10
+            elif consecutive_before == 2:
+                board_score = 0.50
+            else:
+                board_score = 1.00
 
             total_score = (
-                board_strength * 0.25
-                + close_retention * 0.35
-                + vol_score * 0.25
+                return_score * 0.15
+                + close_retention * 0.15
+                + vol_score * 0.15
                 + turnover_score * 0.15
+                + board_score * 0.40
             )
 
             detail = {
                 "passed": True,
                 "prev_close": round(prev_close, 2),
                 "limit_up_price": round(limit_up_price, 2),
-                "high_return": round(high_return, 4),
                 "close_return": round(close_return, 4),
-                "upper_shadow": round(upper_shadow, 4),
                 "turnover": round(turnover, 2),
                 "volume_ratio": round(volume_ratio, 2),
                 "consecutive_before": consecutive_before,
                 "limits_in_window": limits_in_window,
+                "board_score": round(board_score, 4),
                 "total_score": round(total_score, 4),
             }
             self.last_details[code] = detail
@@ -471,6 +532,22 @@ class BrokenBoardSelector(StockSelector):
             else:
                 break
         return count
+
+    def _calc_recent_gain(self, df: pd.DataFrame, days: int) -> float:
+        """计算近N天内（不含当日）的累计涨幅
+
+        Returns
+        -------
+        float
+            累计涨幅（小数），如 0.05 = 5%
+        """
+        if len(df) < days + 2:
+            return 0
+        start_close = float(df["close"].iloc[-(days + 2)])
+        end_close = float(df["close"].iloc[-2])  # 到昨天为止
+        if start_close <= 0:
+            return 0
+        return (end_close - start_close) / start_close
 
     def _count_limits_in_window(self, df: pd.DataFrame) -> int:
         """统计近N个交易日内涨停天数（含当日，非连续）

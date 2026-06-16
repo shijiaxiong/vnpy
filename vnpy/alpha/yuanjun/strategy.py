@@ -399,7 +399,7 @@ class ReliefForceAlphaStrategy(AlphaStrategy):
             "shares": shares,
             "stop_price": stop_price,
             "entry_date": today.strftime("%Y-%m-%d"),
-            "target_price": entry_info.get("target_price", round(bar.close_price * 1.05, 2)),
+            "target_price": round(bar.close_price * (1 + self.strategy_config.risk_config.take_profit_pct), 2),
             "high_since_entry": bar.close_price,
         }
         self.holding_days[vt_symbol] = 0

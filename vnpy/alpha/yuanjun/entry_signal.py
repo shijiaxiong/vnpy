@@ -77,15 +77,6 @@ class EntrySignalChecker:
         if not dist_ok:
             return False, result
 
-        # 条件3：盈亏比检查（≥2:1）
-        target_price = self._estimate_target_price(df)
-        result["target_price"] = target_price
-
-        rr_ok, rr_info = self._check_risk_reward(current_price, stop_loss_price, target_price)
-        result.update(rr_info)
-        if not rr_ok:
-            return False, result
-
         result["can_enter"] = True
         result["entry_price"] = current_price
         return True, result

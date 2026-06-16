@@ -47,5 +47,6 @@ lab/
 
 # Cache
 cache_zt/
+.cache/
 output/
 .workbuddy/

@@ -15,7 +15,7 @@ _YUANJUN_STYLES: dict = {
     },
     "leader": {
         "selector_type": "broken_board",
-        "comment": "龙头援军：冲板未封个股断板后回调止跌介入",
+        "comment": "龙头援军：连板后断板个股回调止跌介入",
     },
 }
 """援军战法风格预设。band=波段援军(原版), leader=龙头援军(新版)"""
@@ -74,26 +74,23 @@ class LeaderConfig:
 class BottomPatternConfig:
     """止跌形态识别配置参数
 
-    精简版：去掉无区分度的缩量/放量/不创新低等条件。
-    保留+新增有实效的条件：
+    当前生效条件（四条件）：
     - 回调幅度（8% → 可调至15%等）
-    - 无大阳线/大阴线（6%以上视为不稳定）
-    - 窄幅筑底（股价在撤军线上方不超过阈值）
     - 年线以上运行（站上250日均线，过滤下跌趋势股）
     - MACD BAR收敛（空头力量减弱确认）
     - 子板块相对强度（排名前50%）
-    
-    参考 analyze_bottoms.py 历史数据分析结论：
-    - 缩量比/放量比：无区分度（差值<0.11）
-    - 不创新低天数：无区分度（差值=-1天）
+
+    已移除条件（配置保留，底部识别中不再检查）：
+    - price_spike_threshold（近3日无剧烈波动）：断板日本身波动大，前3日限制无意义
+    - near_bottom_max_pct（窄幅筑底）：回调足够深即可，不要求紧贴止损线
     """
 
     down_amplitude_min: float = 0.08
     """回调最小幅度（8%）"""
     price_spike_threshold: float = 0.06
-    """禁止出现|日涨幅|>6%的K线（大阳线和大阴线均视为不稳定信号）"""
+    """[已移除] 禁止出现|日涨幅|>6%的K线"""
     near_bottom_max_pct: float = 0.05
-    """股价在最近10日最低价上方不超过此比例（窄幅筑底，5%，覆盖大票温和回调）"""
+    """[已移除] 股价在最近10日最低价上方不超过此比例"""
     above_ma250: bool = True
     """是否要求股价站上250日均线（年线）"""
     cooldown_days: int = 15
@@ -127,7 +124,7 @@ class EntryConfig:
     max_distance_to_stop: float = 0.02
     """距离止损线超过2%则放弃"""
     min_risk_reward_ratio: float = 2.0
-    """最小盈亏比2:1"""
+    """[已移除] 最小盈亏比，入场检查中不再使用"""
     target_resistance_lookback: int = 60
     """阻力位回顾周期（天）"""
 
@@ -148,6 +145,8 @@ class RiskConfig:
     """移动止损回撤比例（3%）"""
     atr_multiplier: float = 2.0
     """ATR止损倍数"""
+    take_profit_pct: float = 0.07
+    """止盈比例（7%），买入价上涨超过此比例考虑止盈"""
     max_consecutive_losses: int = 3
     """最大连续亏损次数后暂停"""
 
@@ -161,7 +160,7 @@ class StrategyConfig:
 
     strategy_style:
       - "band"（默认）: 波段援军 — 板块龙头回调止跌后波段介入，selector=leader
-      - "leader": 龙头援军 — 冲板未封断板后回调止跌介入，selector=broken_board
+      - "leader": 龙头援军 — 连板后断板回调止跌介入，selector=broken_board
     """
 
     # 援军分类
@@ -211,14 +210,18 @@ class StrategyConfig:
     def leader_style(cls, **overrides) -> "StrategyConfig":
         """龙头援军预设（新版）
 
-        涨停断板筛选 → 止跌形态 → 尾盘入场。
+        连板后断板筛选 → 止跌形态 → 尾盘入场。
         适合短线追涨，持仓天数较短。
         """
         cfg = cls(
             strategy_style="leader",
             selector_type="broken_board",
             max_hold_days=5,
+            max_trades_per_day=4,
         )
+        cfg.risk_config.stop_loss_pct = 0.05  # 龙头援军止损放宽至5%
+        cfg.risk_config.max_consecutive_losses = 0  # 0=禁用连亏熔断
+        cfg.entry_config.max_distance_to_stop = 0.08  # 匹配5%止损，距离上限8%
         for k, v in overrides.items():
             setattr(cfg, k, v)
         return cfg

@@ -182,7 +182,7 @@ class RiskManager:
             self.consecutive_losses += 1
             self.total_losses += 1
 
-        if self.consecutive_losses >= self.config.max_consecutive_losses:
+        if 0 < self.config.max_consecutive_losses <= self.consecutive_losses:
             self.is_paused = True
 
         return self.get_status()

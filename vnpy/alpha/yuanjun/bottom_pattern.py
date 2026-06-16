@@ -1,23 +1,17 @@
 """
 模块2：形态识别模块 (BottomPatternRecognizer)
 
-止跌形态识别（六条件版）。
+止跌形态识别（四条件版）。
 
-六个条件：
+四个条件：
 1. 回调幅度 ≥ 阈值（默认8%，可调至15%）
-2. 最近3日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
-3. 股价在撤军线上方不超过阈值（窄幅筑底）
-4. 股价站上250日均线（年线，过滤下跌趋势股）
-5. MACD BAR 连续回升（空头力量减弱确认，可通过 enable_macd_convergence 关闭）
-6. 子板块相对强度排名前50%（可通过 enable_rel_strength_filter 关闭）
+2. 股价站上250日均线（年线，过滤下跌趋势股）
+3. MACD BAR 连续回升（空头力量减弱确认，可通过 enable_macd_convergence 关闭）
+4. 子板块相对强度排名前50%（可通过 enable_rel_strength_filter 关闭）
 
-大阴线同样视为底部不稳定信号（恐慌盘出逃）。
-大阳线视为透支信号（主力已撤退）。
-
-参考 analyze_bottoms.py 历史数据分析结论：
-- 缩量比：无区分度（成功=1.05, 失败=0.94, 差值0.11）
-- 放量比：无区分度（成功=0.98, 失败=0.97, 差值0.01）
-- 不创新低：无区分度（成功=168天, 失败=169天, 差值=-1天）
+已移除条件：
+- 近3日价格平稳（|日涨幅| ≤ 6%）：断板日本身波动大，前3日限制无意义
+- 窄幅筑底（股价在撤军线上方 ≤ 5%）：回调足够深即可，不要求紧贴止损线
 """
 
 from typing import Dict, Tuple
@@ -28,15 +22,13 @@ from .config import BottomPatternConfig
 
 
 class BottomPatternRecognizer:
-    """止跌形态识别器（六条件版）
+    """止跌形态识别器（四条件版）
 
-    逐条检查六个条件：
+    逐条检查四个条件：
     1. 回调幅度 ≥ 阈值
-    2. 最近3日价格平稳（|日涨幅| ≤ 6%），无大阳线也无大阴线
-    3. 股价在撤军线（止损线）上方不超过阈值（窄幅筑底）
-    4. 股价站上250日均线（年线，过滤下跌趋势股）
-    5. MACD BAR 连续回升（空头力量减弱确认）
-    6. 子板块相对强度排名前50%（过滤弱势股）
+    2. 股价站上250日均线（年线，过滤下跌趋势股）
+    3. MACD BAR 连续回升（空头力量减弱确认）
+    4. 子板块相对强度排名前50%（过滤弱势股）
     """
 
     def __init__(self, config: BottomPatternConfig) -> None:
@@ -106,23 +98,19 @@ class BottomPatternRecognizer:
 
         # 条件1：回调幅度达标（≥阈值）
         passed, amp_info = self._check_down_amplitude(df)
+
+        # 涨停次日过滤：近2天内有涨停的不买（涨停反弹已兑现，断板是追高）
+        has_recent_limit = self._has_limit_up_in_recent(df, days=2)
+        if has_recent_limit:
+            result.update(amp_info)
+            result["reason"] = "近2天内有涨停，反弹已兑现，不追"
+            return False, result
+
         result.update(amp_info)
         if not passed:
             return False, result
 
-        # 条件2：最近3日价格平稳（无大阳线且无大阴线）
-        passed, spike_info = self._check_stable_price(df)
-        result.update(spike_info)
-        if not passed:
-            return False, result
-
-        # 条件3：股价在撤军线（止损线）上方不超过阈值（窄幅筑底）
-        passed, near_info = self._check_near_bottom(df, stop_loss_price)
-        result.update(near_info)
-        if not passed:
-            return False, result
-
-        # 条件4：股价站上250日均线（年线，过滤下跌趋势股）
+        # 条件2：股价站上250日均线（年线，过滤下跌趋势股）
         if self.config.above_ma250:
             passed, ma250_info = self._check_above_ma250(df)
             result.update(ma250_info)
@@ -131,13 +119,13 @@ class BottomPatternRecognizer:
         else:
             result["ma250"] = "disabled"
 
-        # 条件5：MACD BAR收敛（空头力量减弱确认）
+        # 条件3：MACD BAR收敛（空头力量减弱确认）
         passed, macd_info = self._check_macd_convergence(df)
         result.update(macd_info)
         if not passed:
             return False, result
 
-        # 条件6：子板块相对强度（过滤排名后50%的弱势股）
+        # 条件4：子板块相对强度（过滤排名后50%的弱势股）
         passed, rank_info = self._check_relative_strength(rel_strength_rank_pct)
         result.update(rank_info)
         if not passed:
@@ -159,11 +147,23 @@ class BottomPatternRecognizer:
     def _calc_down_amplitude(self, df: pd.DataFrame) -> Tuple[float, float]:
         """纯计算：返回 (amplitude, period_high)
 
+        period_high 从至少5天前的K线中取（不含最近5天和当天），
+        避免把上升趋势中的新高误判为"从高点回调"。
+        例如：股票持续上涨时，period_high 取自较远日期，period_low 取自近5日，
+        近5日低点反而高于远日高点，amplitude 为负，不满足回调条件。
+
         供冷却打断判断使用，不含任何阈值判断逻辑。
         """
-        lookback = 30
+        lookback = 10
+        lookback_start = 2  # 排除昨天（通常是涨停日），拿前天及之前的最高点
         recent = df.tail(lookback)
-        period_high = recent["high"].max()
+
+        if len(recent) <= lookback_start:
+            # 数据不足，用全量
+            period_high = recent["high"].max()
+        else:
+            period_high = recent.iloc[:-lookback_start]["high"].max()
+
         period_low = df["low"].iloc[-5:].min()
         amplitude = (period_high - period_low) / period_high if period_high > 0 else 0
         return amplitude, period_high
@@ -171,20 +171,55 @@ class BottomPatternRecognizer:
     def _check_down_amplitude(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
         """计算最近一波下跌幅度，找最近N天内高点到低点，计算回调幅度。
 
+        要求当前价必须低于 period_high（确认处于回调中，而非上升趋势），
+        避免把持续上涨的股票误判为"从高点回调"。
+
         Returns
         -------
         Tuple[bool, Dict]
             (是否通过, {"down_amplitude": float})
         """
-        amplitude, _ = self._calc_down_amplitude(df)
+        amplitude, period_high = self._calc_down_amplitude(df)
+        current_price = float(df["close"].iloc[-1])
 
-        info = {"down_amplitude": round(amplitude, 4)}
+        info = {"down_amplitude": round(amplitude, 4), "period_high": round(period_high, 2)}
+
+        # 当前价必须低于 period_high（排除昨天涨停日），确保处于回调而非上升趋势
+        if current_price >= period_high:
+            info["reason"] = (
+                f"当前价{current_price:.2f} ≥ period_high{period_high:.2f}，处于上升趋势非回调"
+            )
+            return False, info
+
         passed = amplitude >= self.config.down_amplitude_min
         if not passed:
             info["reason"] = (
                 f"回调幅度{amplitude:.2%} < 阈值{self.config.down_amplitude_min:.2%}"
             )
         return passed, info
+
+    # ------------------------------------------------------------------
+    # 涨停次日过滤
+    # ------------------------------------------------------------------
+
+    def _has_limit_up_in_recent(self, df: pd.DataFrame, days: int = 2) -> bool:
+        """检查近N天内（不含当日）是否有涨停（≥9.5%）
+
+        涨停代表反弹已基本兑现。只有当日收盘价仍高于涨停日收盘价时才拦截
+        （说明还在追高），已经跌回涨停线下方的可以放行。
+        """
+        if len(df) < days + 1:
+            return False
+        recent = df.iloc[-(days + 1):-1]  # 不含当天
+        current_close = float(df["close"].iloc[-1])
+        for i in range(1, len(recent)):
+            prev_close = float(recent["close"].iloc[i - 1])
+            cur_close = float(recent["close"].iloc[i])
+            if prev_close > 0 and (cur_close - prev_close) / prev_close >= 0.095:
+                # 涨停了，检查当前价是否仍在涨停收盘价之上
+                if current_close > cur_close:
+                    return True
+        return False
 
     # ------------------------------------------------------------------
     # 条件2：价格平稳性检查（大阳线 + 大阴线）
