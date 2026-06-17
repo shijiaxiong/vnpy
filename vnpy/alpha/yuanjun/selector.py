@@ -291,6 +291,14 @@ class BrokenBoardConfig:
     exclude_bse: bool = True
     """是否排除北交所(83/87/43/46开头)，默认True。北交所涨跌停30%"""
 
+    board_cooling_days: int = 1
+    """断板后最少冷却天数。默认1=断板后至少等1天才能入场（跳过涨停次日）。"""
+
+    board_window_days: int = 15
+    """涨停回溯窗口。从今天往前最多看多少个交易日找最近一次涨停。
+    找到后，只要涨停之后到昨天为止没有再涨停，今天就是候选入场日。
+    这意味着断板后的第2~15天每天都会被检查。"""
+
 
 class BrokenBoardSelector(StockSelector):
     """断板个股筛选器
@@ -380,40 +388,59 @@ class BrokenBoardSelector(StockSelector):
             close_return = (today_close - prev_close) / prev_close
             upper_shadow = (today_high - max(today_close, today_open)) / today_high if today_high > 0 else 0
 
-            # 条件1：涨停势能 — 有连板或近期涨幅兜底
-            consecutive_before = self._count_consecutive_limits_before(df)
-            has_limit_up = consecutive_before >= cfg.min_consecutive_limits_before if cfg.min_consecutive_limits_before > 0 else consecutive_before > 0
+            # 条件1：涨停回溯 — 在最近 board_window_days 天内找到涨停
+            # 找到最近一次涨停，确认涨停结束至今没有新涨停
+            limit_up_idx = self._find_recent_limit_up(df, cfg.board_window_days)
 
-            if not has_limit_up:
-                if consecutive_before > 0:
-                    # 有连板但不够 min → 排除
+            if limit_up_idx < 0:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"近{cfg.board_window_days}个交易日内无涨停",
+                }
+                continue
+
+            # 涨停连续个数（用于 max_consecutive 检查）
+            consecutive_before = self._count_consecutive_at(df, limit_up_idx)
+
+            # 检查涨停结束后到今天为止，中间是否有新的涨停（断板信号作废）
+            has_new_limit = False
+            for i in range(limit_up_idx + 1, len(df) - 1):
+                if i < 1:
+                    continue
+                close_i = float(df["close"].iloc[i])
+                prev_i = float(df["close"].iloc[i - 1])
+                if prev_i > 0 and (close_i - prev_i) / prev_i >= cfg.limit_up_line:
+                    has_new_limit = True
                     self.last_details[code] = {
                         "passed": False,
-                        "reason": f"仅连板{consecutive_before}天 < 最少{cfg.min_consecutive_limits_before}天，涨停势能不足",
+                        "reason": f"涨停后出现新涨停(第{i - limit_up_idx}天)，断板信号不成立",
                     }
-                    continue
-                # consecutive_before == 0: 无任何涨停
-                if cfg.min_consecutive_limits_before > 0:
-                    # 要求有涨停但无 → 排除（min>0 时关闭 B 方案）
-                    self.last_details[code] = {
-                        "passed": False,
-                        "reason": f"无涨停，且要求最少{cfg.min_consecutive_limits_before}连板",
-                    }
-                    continue
-                # min=0 时 B 方案兜底：近 N 日累计涨幅
-                recent_gain = self._calc_recent_gain(df, cfg.recent_gain_days)
-                if recent_gain < cfg.min_recent_gain_pct:
-                    self.last_details[code] = {
-                        "passed": False,
-                        "reason": f"无涨停且近{cfg.recent_gain_days}天涨幅{recent_gain:.1%} < {cfg.min_recent_gain_pct:.0%}",
-                    }
-                    continue
+                    break
+            if has_new_limit:
+                continue
+
+            # 冷却检查：至少冷却 days 个交易日
+            days_since_limit = len(df) - 1 - limit_up_idx
+            if days_since_limit <= cfg.board_cooling_days:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"涨停后仅{days_since_limit}天 < 最少冷却{cfg.board_cooling_days + 1}天（含断板日）",
+                }
+                continue
 
             # 条件2：今日不再涨停（收盘涨幅 < 涨停线）
             if close_return >= cfg.limit_up_line:
                 self.last_details[code] = {
                     "passed": False,
                     "reason": f"收盘涨幅{close_return:.2%} >= 涨停线{cfg.limit_up_line:.0%}，仍在涨停非断板",
+                }
+                continue
+
+            # 条件2b：今日不是暴跌（跌幅 ≥ 7% 直接排除，防止跌停日接飞刀）
+            if close_return <= -0.07:
+                self.last_details[code] = {
+                    "passed": False,
+                    "reason": f"当日跌幅{close_return:.1%}，可能是崩盘非回调，不追",
                 }
                 continue
 
@@ -516,12 +543,68 @@ class BrokenBoardSelector(StockSelector):
         details = {code: self.last_details.get(code, {}) for code in selected}
         return selected, details
 
-    def _count_consecutive_limits_before(self, df: pd.DataFrame) -> int:
-        """计算断板日之前（不含当日）的连续涨停天数"""
+    def _find_recent_limit_up(self, df: pd.DataFrame, max_lookback: int) -> int:
+        """在最近 max_lookback 个交易日内找最近一次涨停的索引
+
+        从昨天往前扫，找到最近一个涨幅≥9.5%的涨停日。
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            日线数据
+        max_lookback : int
+            最多向前看多少个交易日
+
+        Returns
+        -------
+        int
+            涨停日索引，未找到返回 -1
+        """
+        lookback = min(max_lookback, len(df) - 2)
+        for offset in range(lookback):
+            i = len(df) - 2 - offset  # 从昨天开始往前
+            if i <= 0:
+                break
+            close = float(df["close"].iloc[i])
+            prev = float(df["close"].iloc[i - 1])
+            if prev > 0 and (close - prev) / prev >= self.config.limit_up_line:
+                return i
+        return -1
+
+    def _count_consecutive_at(self, df: pd.DataFrame, end_idx: int) -> int:
+        """计算以 end_idx 为结束的连续涨停天数"""
         count = 0
         threshold = self.config.limit_up_line
-        # 从倒数第2天开始往前数（倒数第1天是当天=断板日）
-        for i in range(len(df) - 2, -1, -1):
+        for i in range(end_idx, 0, -1):
+            close = float(df["close"].iloc[i])
+            prev = float(df["close"].iloc[i - 1])
+            if prev <= 0:
+                break
+            if (close - prev) / prev >= threshold:
+                count += 1
+            else:
+                break
+        return count
+
+    def _count_consecutive_limits_before(self, df: pd.DataFrame, skip_days: int = 1) -> int:
+        """计算连续涨停天数。
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            日线数据
+        skip_days : int
+            跳过最后N天。1=从倒数第2天开始数（默认，断板日当天）；
+            2=从倒数第3天开始数（冷却1天，断板日后第2天）。
+
+        Returns
+        -------
+        int
+            连续涨停天数
+        """
+        count = 0
+        threshold = self.config.limit_up_line
+        for i in range(len(df) - 1 - skip_days, -1, -1):
             close = float(df["close"].iloc[i])
             prev = float(df["close"].iloc[i - 1]) if i > 0 else 0.0
             if prev <= 0:

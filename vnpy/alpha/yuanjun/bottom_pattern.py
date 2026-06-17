@@ -4,10 +4,14 @@
 止跌形态识别（四条件版）。
 
 四个条件：
-1. 回调幅度 ≥ 阈值（默认8%，可调至15%）
+1. 回调幅度 ≥ 阈值（默认8%。使用断板后阶段性顶部算法，可切换旧版滚动窗口）
 2. 股价站上250日均线（年线，过滤下跌趋势股）
 3. MACD BAR 连续回升（空头力量减弱确认，可通过 enable_macd_convergence 关闭）
 4. 子板块相对强度排名前50%（可通过 enable_rel_strength_filter 关闭）
+
+条件1 算法（use_post_board_peak=True，默认）：
+  找到最近一个涨停日，向后找到不再创新高的阶段性顶部，从该顶部计算回落幅度。
+  这确保回调基准是"真正的高点"而非滚动窗口中的随机点。
 
 已移除条件：
 - 近3日价格平稳（|日涨幅| ≤ 6%）：断板日本身波动大，前3日限制无意义
@@ -130,6 +134,12 @@ class BottomPatternRecognizer:
         if not passed:
             return False, result
 
+        # 条件5：不再创新低（过滤断板后继续探底的飞刀）
+        passed, nol_info = self._check_no_new_low(df)
+        result.update(nol_info)
+        if not passed:
+            return False, result
+
         # 所有条件均满足 → 触发，记录触发日期和幅度，进入冷却期
         result["is_bottom"] = True
         if cooldown_interrupted:
@@ -143,47 +153,178 @@ class BottomPatternRecognizer:
     # 条件1：回调幅度检查
     # ------------------------------------------------------------------
 
+    def _find_last_limit_up_day(self, df: pd.DataFrame) -> int:
+        """找到最近一个涨停日（≥9.5%）的索引
+
+        从倒数第2天（昨天）往前扫，找最近一次涨停。
+        不扫描最后1天（今天），因为今天正在评估是否为断板日。
+
+        Returns
+        -------
+        int
+            涨停日索引，未找到返回 -1
+        """
+        if len(df) < 3:
+            return -1
+        # 从昨天开始往前找
+        for i in range(len(df) - 2, 0, -1):
+            prev_close = float(df["close"].iloc[i - 1])
+            cur_close = float(df["close"].iloc[i])
+            if prev_close > 0 and (cur_close - prev_close) / prev_close >= 0.095:
+                return i
+        return -1
+
+    def _find_post_board_peak(self, df: pd.DataFrame) -> Tuple[float, float, int, bool]:
+        """找到涨停日后的阶段性顶部（不再被超越的最高点）
+
+        逻辑：
+        1. 找到最近一个涨停日 → 下一天为"断板日"
+        2. 从涨停日当天起，向后扫描找最高价作为阶段性顶部
+        3. 顶部确认条件：今天（df最后一天）最高价 < 顶部最高价，且顶部至少距今1天
+
+        Returns
+        -------
+        Tuple[float, float, int, bool]
+            (peak_high, peak_close, peak_idx, confirmed)
+            peak_high:  顶部最高价
+            peak_close: 顶部当日的收盘价
+            peak_idx:   顶部在df中的索引位置
+            confirmed:  True=顶部已确认（今天不再创新高），False=今天仍在创新高/尚未确认
+        """
+        limit_up_idx = self._find_last_limit_up_day(df)
+        if limit_up_idx < 0:
+            return 0.0, 0.0, -1, False
+
+        # 从涨停日当天起扫描到昨天（不含今天），找涨停之后的阶段性顶部
+        # 只测量涨停之后的回落，不使用涨停前的旧跌幅
+        scan_start = limit_up_idx
+        peak_high = 0.0
+        peak_close = 0.0
+        peak_idx = scan_start
+
+        scan_end = len(df) - 1  # 不含今天
+        for i in range(scan_start, scan_end):
+            h = float(df["high"].iloc[i])
+            if h > peak_high:
+                peak_high = h
+                peak_close = float(df["close"].iloc[i])
+                peak_idx = i
+
+        # 顶部确认：今天最高价 < 顶部最高价（不再创新高）
+        today_high = float(df["high"].iloc[-1])
+        confirmed = (today_high < peak_high) and (peak_idx < len(df) - 1)
+
+        if not confirmed and today_high >= peak_high:
+            # 今天还在突破，更新顶部但标记未确认
+            peak_high = today_high
+            peak_close = float(df["close"].iloc[-1])
+            peak_idx = len(df) - 1
+
+        return peak_high, peak_close, peak_idx, confirmed
+
     def _calc_down_amplitude(self, df: pd.DataFrame) -> Tuple[float, float]:
         """纯计算：返回 (amplitude, period_high)
 
-        period_high 从至少5天前的K线中取（不含最近5天和当天），
-        避免把上升趋势中的新高误判为"从高点回调"。
-        例如：股票持续上涨时，period_high 取自较远日期，period_low 取自近5日，
-        近5日低点反而高于远日高点，amplitude 为负，不满足回调条件。
+        当 use_post_board_peak=True（默认）：
+          涨停日后阶段性顶部 → 顶部之后的最低价，计算真实回落幅度。
 
-        供冷却打断判断使用，不含任何阈值判断逻辑。
+        当 use_post_board_peak=False：
+          旧版滚动窗口法（近10天高点配合近5天低点），向后兼容。
         """
-        lookback = 10
-        lookback_start = 2  # 排除昨天（通常是涨停日），拿前天及之前的最高点
-        recent = df.tail(lookback)
+        if not self.config.use_post_board_peak:
+            return self._calc_down_amplitude_rolling(df)
 
+        peak_high, peak_close, peak_idx, confirmed = self._find_post_board_peak(df)
+
+        if peak_high <= 0 or peak_idx < 0:
+            return self._calc_down_amplitude_rolling(df)
+
+        # period_low = 顶部之后的最低价（不含顶部之前的数据）
+        if peak_idx < len(df) - 1:
+            period_low = float(df["low"].iloc[peak_idx:].min())
+        else:
+            # 顶部就是今天，无后续数据
+            period_low = float(df["low"].iloc[-1])
+
+        amplitude = (peak_high - period_low) / peak_high if peak_high > 0 else 0
+        return amplitude, peak_high
+
+    def _calc_down_amplitude_rolling(self, df: pd.DataFrame) -> Tuple[float, float]:
+        """旧版滚动窗口计算（备用）"""
+        lookback = 10
+        lookback_start = 2
+        recent = df.tail(lookback)
         if len(recent) <= lookback_start:
-            # 数据不足，用全量
             period_high = recent["high"].max()
         else:
             period_high = recent.iloc[:-lookback_start]["high"].max()
-
         period_low = df["low"].iloc[-5:].min()
         amplitude = (period_high - period_low) / period_high if period_high > 0 else 0
         return amplitude, period_high
 
     def _check_down_amplitude(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
-        """计算最近一波下跌幅度，找最近N天内高点到低点，计算回调幅度。
+        """计算回调幅度。
 
-        要求当前价必须低于 period_high（确认处于回调中，而非上升趋势），
-        避免把持续上涨的股票误判为"从高点回调"。
+        新版（use_post_board_peak=True）：
+          找到涨停日 → 阶段性顶部 → 顶部之后的回落幅度。
+          额外要求：顶部已确认（今天不再创新高）、当前价低于顶部。
+
+        旧版：近10天高点 vs 近5天低点。
 
         Returns
         -------
         Tuple[bool, Dict]
-            (是否通过, {"down_amplitude": float})
+            (是否通过, {"down_amplitude": float, "period_high": float, ...})
         """
-        amplitude, period_high = self._calc_down_amplitude(df)
+        if self.config.use_post_board_peak:
+            peak_high, peak_close, peak_idx, confirmed = self._find_post_board_peak(df)
+            if peak_high <= 0:
+                return False, {"reason": "未找到涨停日，无法确定顶部"}
+
+            # 顶部必须已确认：今天不再创新高
+            if not confirmed:
+                today_high = float(df["high"].iloc[-1])
+                return False, {
+                    "reason": f"今天最高价{today_high:.2f}仍在突破顶部{peak_high:.2f}，回调尚未开始",
+                    "period_high": round(peak_high, 2),
+                }
+
+            # period_low = 顶部之后的最低价
+            if peak_idx < len(df) - 1:
+                period_low = float(df["low"].iloc[peak_idx:].min())
+            else:
+                period_low = float(df["low"].iloc[-1])
+
+            amplitude = (peak_high - period_low) / peak_high if peak_high > 0 else 0
+            current_price = float(df["close"].iloc[-1])
+
+            info = {
+                "down_amplitude": round(amplitude, 4),
+                "period_high": round(peak_high, 2),
+                "peak_date": str(df.index[peak_idx].date()) if hasattr(df.index[peak_idx], "date") else str(df.index[peak_idx]),
+                "days_since_peak": len(df) - 1 - peak_idx,
+            }
+
+            if current_price >= peak_high:
+                info["reason"] = (
+                    f"当前价{current_price:.2f} ≥ 顶部{peak_high:.2f}，未回落"
+                )
+                return False, info
+
+            if amplitude < self.config.down_amplitude_min:
+                info["reason"] = (
+                    f"从顶部{peak_high:.2f}回落{amplitude:.2%} < 阈值{self.config.down_amplitude_min:.2%}"
+                )
+                return False, info
+
+            return True, info
+
+        # 旧版逻辑
+        amplitude, period_high = self._calc_down_amplitude_rolling(df)
         current_price = float(df["close"].iloc[-1])
 
         info = {"down_amplitude": round(amplitude, 4), "period_high": round(period_high, 2)}
 
-        # 当前价必须低于 period_high（排除昨天涨停日），确保处于回调而非上升趋势
         if current_price >= period_high:
             info["reason"] = (
                 f"当前价{current_price:.2f} ≥ period_high{period_high:.2f}，处于上升趋势非回调"
@@ -354,7 +495,66 @@ class BottomPatternRecognizer:
         return passed, info
 
     # ------------------------------------------------------------------
-    # 条件3：窄幅筑底检查
+    # 条件5：不再创新低检查
+    # ------------------------------------------------------------------
+
+    def _check_no_new_low(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
+        """检查入场日是否不再创新低。
+
+        找到最近涨停日，比较今日最低价与涨停以来的最低价：
+        - 今日最低 ≥ 涨停日以来最低 → 止跌确认，通过
+        - 今日最低 < 涨停日以来最低 → 仍在探底，拒绝
+
+        断板日当天（涨停后第一个非涨停交易日）自动通过，
+        因为此时还没有"涨停后"的参考最低价。
+
+        Returns
+        -------
+        Tuple[bool, Dict]
+            (是否通过, 详情)
+        """
+        if not self.config.enable_no_new_low:
+            return True, {"no_new_low": "disabled"}
+
+        limit_up_idx = self._find_last_limit_up_day(df)
+        if limit_up_idx < 0:
+            return True, {"no_new_low": "no_limit_up_found"}
+
+        # 断板日当天（涨停后第一天）自动通过
+        if limit_up_idx == len(df) - 2:
+            return True, {
+                "no_new_low": True,
+                "note": "断板首日，自动通过",
+            }
+
+        # 从涨停日次日起到昨天（不含今天），找最低价
+        post_limit_lows = []
+        for i in range(limit_up_idx + 1, len(df) - 1):
+            post_limit_lows.append(float(df["low"].iloc[i]))
+
+        if not post_limit_lows:
+            return True, {"no_new_low": True, "note": "无涨停后参考数据"}
+
+        post_min = min(post_limit_lows)
+        today_low = float(df["low"].iloc[-1])
+
+        info = {
+            "no_new_low_post_min": round(post_min, 2),
+            "no_new_low_today": round(today_low, 2),
+        }
+
+        if today_low >= post_min:
+            info["no_new_low"] = True
+            return True, info
+
+        info["no_new_low"] = False
+        info["reason"] = (
+            f"今日最低{today_low:.2f} < 涨停后最低{post_min:.2f}，仍在创新低"
+        )
+        return False, info
+
+    # ------------------------------------------------------------------
+    # 已移除：窄幅筑底检查
     # ------------------------------------------------------------------
 
     def _check_near_bottom(self, df: pd.DataFrame, stop_loss_price: float = 0.0) -> Tuple[bool, Dict]:

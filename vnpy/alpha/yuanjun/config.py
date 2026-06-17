@@ -87,6 +87,14 @@ class BottomPatternConfig:
 
     down_amplitude_min: float = 0.08
     """回调最小幅度（8%）"""
+    use_post_board_peak: bool = True
+    """是否使用断板后阶段性顶部计算回调幅度。
+
+    True（默认）：找到最后一个涨停日→断板日→找出此后不再创新高的阶段性顶部，
+    从该顶部计算回落幅度。更精确地定位回调深度。
+
+    False：使用旧版滚动窗口法（近10天高点配合近5天低点），适合波段援军。
+    """
     price_spike_threshold: float = 0.06
     """[已移除] 禁止出现|日涨幅|>6%的K线"""
     near_bottom_max_pct: float = 0.05
@@ -107,6 +115,12 @@ class BottomPatternConfig:
     """是否启用子板块相对强度过滤（过滤排名后50%）"""
     rel_strength_top_pct: float = 0.5
     """子板块内排名前N%才通过（0.5=前50%）"""
+    enable_no_new_low: bool = True
+    """是否要求入场日不再创新低。
+
+    True（默认）：断板日后，只有当今日最低价 ≥ 涨停日以来最低价时才算止跌确认。
+    防止在断板日后股价还在持续探底时接飞刀。
+    """
 
 
 @dataclass
