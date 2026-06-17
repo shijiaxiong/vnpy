@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-PROJECT_ROOT = "/Users/zyb/go/src/github/vnpy"
+PROJECT_ROOT = "/Users/shijiaxiong/go/src/github.com/vnpy"
 sys.path.insert(0, PROJECT_ROOT)
 os.environ["PYTHONPATH"] = PROJECT_ROOT
 
@@ -29,11 +29,13 @@ from vnpy.alpha.yuanjun.selector import BrokenBoardConfig, BrokenBoardSelector
 from vnpy.alpha.yuanjun.backtest import TradeRecord, PerformanceResult, BacktestEvaluator
 
 # ---------- 配置 ----------
-DB_PATH = os.path.join(PROJECT_ROOT, ".cache/database.db")  # 备份数据库
+DB_PATH = os.path.expanduser("~/.vntrader/database_2026.db")  # 主数据库（含回测窗口数据）
+DB_PATH_HISTORY = os.path.expanduser("~/.vntrader/database_2025.db")  # 历史数据库（含MA250计算所需回看数据）
+NAME_CACHE = os.path.join(PROJECT_ROOT, ".cache/stock_names.json")  # 股票名称缓存
 STOCK_CACHE = os.path.join(PROJECT_ROOT, ".cache/stocks_akshare.json")
-DATE_START = "2026-01-02"
-DATE_END = "2026-06-16"
-DATE_LOOKBACK = "2024-01-01"  # 2.5年历史，确保MA250/MACD可用
+DATE_START = "2026-06-01"
+DATE_END = "2026-06-17"
+DATE_LOOKBACK = "2024-01-01"  # 2.5年历史，确保MA250/MACD可用（实际通过2025+2026库覆盖）
 INITIAL_CAPITAL = 1_000_000.0
 MAX_SYMBOLS = 500  # 500只样本，平衡速度和覆盖度
 
@@ -62,47 +64,101 @@ def get_stock_symbols(max_n: int = MAX_SYMBOLS) -> List[str]:
 
 
 def query_symbol(symbol: str, conn: sqlite3.Connection, 
-                 date_start: str, date_end: str) -> Optional[pd.DataFrame]:
-    """查询单只股票的日线（利用复合索引，逐symbol查询避免全表扫描）"""
-    query = """
-        WITH daily AS (
-            SELECT
-                DATE(datetime) AS trade_date,
-                high_price    AS high,
-                low_price     AS low,
-                volume,
-                turnover,
-                FIRST_VALUE(close_price) OVER (
-                    PARTITION BY DATE(datetime)
-                    ORDER BY datetime
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-                ) AS open_price,
-                LAST_VALUE(close_price) OVER (
-                    PARTITION BY DATE(datetime)
-                    ORDER BY datetime
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-                ) AS close_price
-            FROM dbbardata
-            WHERE symbol = ?
-                AND exchange IN ('SSE', 'SZSE')
-                AND interval = '5m'
-                AND datetime >= ? || ' 09:00:00'
-                AND datetime <= ? || ' 15:10:00'
-        )
-        SELECT
-            trade_date,
-            open_price  AS open,
-            MAX(high)   AS high,
-            MIN(low)    AS low,
-            close_price AS close,
-            SUM(volume) AS volume,
-            SUM(turnover) AS turnover
-        FROM daily
-        GROUP BY trade_date
-        ORDER BY trade_date
+                 date_start: str, date_end: str,
+                 use_history: bool = False) -> Optional[pd.DataFrame]:
+    """查询单只股票的日线（利用复合索引，逐symbol查询避免全表扫描）
+    
+    当 use_history=True 时，通过跨库 UNION ALL 从主库和历史库合并数据。
     """
+    if use_history:
+        query = """
+            WITH daily AS (
+                SELECT
+                    DATE(datetime) AS trade_date,
+                    high_price    AS high,
+                    low_price     AS low,
+                    volume,
+                    turnover,
+                    FIRST_VALUE(close_price) OVER (
+                        PARTITION BY DATE(datetime)
+                        ORDER BY datetime
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+                    ) AS open_price,
+                    LAST_VALUE(close_price) OVER (
+                        PARTITION BY DATE(datetime)
+                        ORDER BY datetime
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+                    ) AS close_price
+                FROM (
+                    SELECT * FROM main.dbbardata
+                    WHERE symbol = ?
+                        AND exchange IN ('SSE', 'SZSE')
+                        AND interval = '5m'
+                        AND datetime >= ? || ' 09:00:00'
+                        AND datetime <= ? || ' 15:10:00'
+                    UNION ALL
+                    SELECT * FROM history.dbbardata
+                    WHERE symbol = ?
+                        AND exchange IN ('SSE', 'SZSE')
+                        AND interval = '5m'
+                        AND datetime >= ? || ' 09:00:00'
+                        AND datetime <= ? || ' 15:10:00'
+                )
+            )
+            SELECT
+                trade_date,
+                open_price  AS open,
+                MAX(high)   AS high,
+                MIN(low)    AS low,
+                close_price AS close,
+                SUM(volume) AS volume,
+                SUM(turnover) AS turnover
+            FROM daily
+            GROUP BY trade_date
+            ORDER BY trade_date
+        """
+        params = (symbol, date_start, date_end, symbol, date_start, date_end)
+    else:
+        query = """
+            WITH daily AS (
+                SELECT
+                    DATE(datetime) AS trade_date,
+                    high_price    AS high,
+                    low_price     AS low,
+                    volume,
+                    turnover,
+                    FIRST_VALUE(close_price) OVER (
+                        PARTITION BY DATE(datetime)
+                        ORDER BY datetime
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+                    ) AS open_price,
+                    LAST_VALUE(close_price) OVER (
+                        PARTITION BY DATE(datetime)
+                        ORDER BY datetime
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+                    ) AS close_price
+                FROM dbbardata
+                WHERE symbol = ?
+                    AND exchange IN ('SSE', 'SZSE')
+                    AND interval = '5m'
+                    AND datetime >= ? || ' 09:00:00'
+                    AND datetime <= ? || ' 15:10:00'
+            )
+            SELECT
+                trade_date,
+                open_price  AS open,
+                MAX(high)   AS high,
+                MIN(low)    AS low,
+                close_price AS close,
+                SUM(volume) AS volume,
+                SUM(turnover) AS turnover
+            FROM daily
+            GROUP BY trade_date
+            ORDER BY trade_date
+        """
+        params = (symbol, date_start, date_end)
     try:
-        df = pd.read_sql(query, conn, params=(symbol, date_start, date_end))
+        df = pd.read_sql(query, conn, params=params)
         if len(df) < 60:
             return None
         df["trade_date"] = pd.to_datetime(df["trade_date"])
@@ -113,17 +169,25 @@ def query_symbol(symbol: str, conn: sqlite3.Connection,
 
 
 def load_stock_data(symbols: List[str]) -> Tuple[Dict[str, pd.DataFrame], List[datetime]]:
-    """逐只加载日线数据"""
+    """逐只加载日线数据（跨2025+2026两库查询以确保MA250计算可用）"""
     t0 = time.time()
     conn = sqlite3.connect(DB_PATH, timeout=10)
-    # 使用只读模式避免数据库锁
     conn.execute("PRAGMA query_only = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
+
+    # ATTACH 历史数据库（2025年），提供MA250回看数据
+    if os.path.exists(DB_PATH_HISTORY):
+        conn.execute(f"ATTACH DATABASE '{DB_PATH_HISTORY}' AS history")
+        union_all = True
+        print(f"  已挂载历史库: {DB_PATH_HISTORY}")
+    else:
+        union_all = False
+        print(f"  警告: 历史库不存在 {DB_PATH_HISTORY}, MA250计算可能不准确")
 
     stock_data: Dict[str, pd.DataFrame] = {}
     failed = 0
     for i, sym in enumerate(symbols):
-        df = query_symbol(sym, conn, DATE_LOOKBACK, DATE_END)
+        df = query_symbol(sym, conn, DATE_LOOKBACK, DATE_END, use_history=union_all)
         if df is not None:
             stock_data[sym] = df
         else:
@@ -211,7 +275,7 @@ class LeaderBacktest:
             if (t_idx + 1) % 5 == 0 or t_idx == 0:
                 et = time.time() - t0
                 print(f"  [{t_idx+1}/{len(self.trade_dates)}] {date.date()} "
-                      f"| 持仓{len(self.positions)} | 交易{len(self.trade_records)} | 净值{self._net_value():.2f} | 耗时{et:.0f}s")
+                      f"| 持仓{len(self.positions)} | 交易{len(self.trade_records)} | 净值{self._net_value(date):.2f} | 耗时{et:.0f}s")
 
         elapsed = time.time() - t0
         print(f"\n回测完成，总耗时 {elapsed:.0f}s")
@@ -267,7 +331,7 @@ class LeaderBacktest:
                     is_win=is_win,
                     hold_days=hold_days,
                 ))
-                self.capital += pnl_amount  # 更新资金
+                self.capital += pos.get("cost", pos["shares"] * entry_price) + pnl_amount  # 归还开仓成本 + 盈亏
                 self.risk_manager.update_after_trade(is_win)
                 del self.positions[sym]
                 del self.holding_days[sym]
@@ -324,7 +388,7 @@ class LeaderBacktest:
 
             # 仓位（计算后按可用资金截断）
             position_size, _ = self.risk_manager.calculate_position_size(
-                self._net_value(), current_price, stop_price
+                self._net_value(date), current_price, stop_price
             )
             max_shares = int(self.capital * 0.25 / current_price)  # 单票最多25%仓位
             position_size = min(position_size, max_shares)
@@ -332,6 +396,7 @@ class LeaderBacktest:
                 continue
 
             # 入场
+            cost = position_size * current_price
             self.positions[code] = {
                 "entry_price": current_price,
                 "shares": position_size,
@@ -339,17 +404,21 @@ class LeaderBacktest:
                 "entry_date": date_str,
                 "target_price": round(current_price * (1 + self.risk_config.take_profit_pct), 2),
                 "high_since_entry": current_price,
+                "cost": cost,
             }
+            self.capital -= cost  # 从可用资金扣除开仓成本
             self.holding_days[code] = 0
             self.stats["trades_executed"] += 1
             entered_today += 1
 
-    def _net_value(self) -> float:
-        """当前总净值"""
+    def _net_value(self, date: datetime = None) -> float:
+        """当前总净值（基于指定日期的收盘价）"""
         val = self.capital
         for sym, pos in self.positions.items():
             df = self.stock_data.get(sym)
-            if df is not None and len(df) > 0:
+            if df is not None and date is not None and date in df.index:
+                val += pos["shares"] * float(df.loc[date, "close"])
+            elif df is not None and len(df) > 0:
                 val += pos["shares"] * float(df["close"].iloc[-1])
         return val
 
@@ -357,12 +426,12 @@ class LeaderBacktest:
         """记录每日净值"""
         self.equity_points.append({
             "date": date,
-            "equity": self._net_value(),
+            "equity": self._net_value(date),
             "positions": len(self.positions),
         })
 
 
-def print_summary(records: List[TradeRecord], equity_df: pd.DataFrame):
+def print_summary(records: List[TradeRecord], equity_df: pd.DataFrame, names: Dict[str, str] = None):
     """打印回测摘要"""
     if not records:
         print("\n  无交易记录，检查策略条件是否过严")
@@ -400,18 +469,30 @@ def print_summary(records: List[TradeRecord], equity_df: pd.DataFrame):
             avg = np.mean([r.pnl_pct for r in rs])
             print(f"  {reason}: {len(rs)}笔, 胜率{wr:.0f}%, 平均盈亏{avg:.2f}%")
 
+    if names is None:
+        names = {}
     print("\n交易明细:")
-    print(f"  {'日期':>12}  {'代码':>8}  {'入场':>8}  {'出场':>8}  {'盈亏':>8}  {'原因':>8}")
-    print(f"  {'-'*60}")
+    print(f"  {'入场日':>12}  {'出场日':>12}  {'代码':>12}  {'入场价':>8}  {'出场价':>8}  {'盈亏':>8}  {'原因':>6}")
+    print(f"  {'-'*85}")
     for r in records[:20]:
-        print(f"  {r.exit_date:>12}  {r.vt_symbol:>8}  {r.entry_price:>8.2f}  {r.exit_price:>8.2f}  {r.pnl_pct:>7.2f}%  {r.exit_reason:>8}")
+        code = r.vt_symbol
+        name = names.get(code, "")
+        display = f"{code} {name}" if name else code
+        print(f"  {r.entry_date:>12}  {r.exit_date:>12}  {display:<12}  {r.entry_price:>8.2f}  {r.exit_price:>8.2f}  {r.pnl_pct:>7.2f}%  {r.exit_reason:>6}")
 
 
 def main():
     print("=" * 60)
-    print("龙头援军回测 — 2026年全年")
+    print("龙头援军回测 — 2026年6月")
     print(f"策略: leader_style | 止盈+7% | 止损-5% | 最大持仓5天 | 日上限4笔")
     print("=" * 60)
+
+    # 加载股票名称映射
+    names: Dict[str, str] = {}
+    if os.path.exists(NAME_CACHE):
+        with open(NAME_CACHE, "r") as f:
+            names = json.load(f)
+        print(f"  已加载 {len(names)} 只股票名称映射")
 
     # 1. 加载股票列表
     print("\n[1/3] 加载股票列表...")
@@ -435,14 +516,16 @@ def main():
           f"入场通过: {bt.stats['entry_pass']} | "
           f"实际交易: {bt.stats['trades_executed']}")
 
-    print_summary(bt.trade_records, equity_df)
+    print_summary(bt.trade_records, equity_df, names)
 
     # 保存
     out_dir = os.path.join(PROJECT_ROOT, "output")
     os.makedirs(out_dir, exist_ok=True)
     equity_df.to_csv(os.path.join(out_dir, "equity_202601_leader.csv"), index=False)
     trade_df = pd.DataFrame([{
-        "symbol": r.vt_symbol, "entry_date": r.entry_date, "exit_date": r.exit_date,
+        "symbol": r.vt_symbol,
+        "name": names.get(r.vt_symbol, "") if names else "",
+        "entry_date": r.entry_date, "exit_date": r.exit_date,
         "entry_price": r.entry_price, "exit_price": r.exit_price,
         "pnl_pct": r.pnl_pct, "reason": r.exit_reason, "is_win": r.is_win,
     } for r in bt.trade_records])
